@@ -1,11 +1,11 @@
 //! Starting an app on the native backend of the target platform.
 
-use mitsuami_core::{AnyView, Size, Ui, UiEvent, View};
+use mitsuami_core::{AnyView, Ui, UiEvent, View, WindowSize};
 use mitsuami_reactive::{Owner, provide};
 
 struct WindowSpec {
     title: String,
-    size: Size,
+    size: WindowSize,
     content: Box<dyn FnOnce() -> AnyView>,
 }
 
@@ -24,14 +24,17 @@ impl App {
         App::default()
     }
 
-    /// Adds a window, opened at startup. `size` is the content size.
+    /// Adds a window, opened at startup. `size` is the content size: a
+    /// [`Size`](mitsuami_core::Size), or [`WindowSize::FitHeight`] to fit
+    /// the height to the content.
     pub fn window<V: View>(
         mut self,
         title: impl Into<String>,
-        size: Size,
+        size: impl Into<WindowSize>,
         content: impl FnOnce() -> V + 'static,
     ) -> App {
-        self.windows.push(WindowSpec { title: title.into(), size, content: Box::new(move || AnyView::new(content())) });
+        let content = Box::new(move || AnyView::new(content()));
+        self.windows.push(WindowSpec { title: title.into(), size: size.into(), content });
         self
     }
 

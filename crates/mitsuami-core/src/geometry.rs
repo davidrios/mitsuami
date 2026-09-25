@@ -19,6 +19,22 @@ impl Size {
     }
 }
 
+/// The content size a window opens at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowSize {
+    Fixed(Size),
+    /// This width, and the height of the content at its first layout, so
+    /// the window fits what each platform's controls add up to. After that
+    /// it's an ordinary window: it doesn't follow later content changes.
+    FitHeight(f32),
+}
+
+impl From<Size> for WindowSize {
+    fn from(size: Size) -> WindowSize {
+        WindowSize::Fixed(size)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
     pub x: f32,

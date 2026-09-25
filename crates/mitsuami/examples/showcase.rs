@@ -89,7 +89,7 @@ fn log(lines: Signal<Vec<u32>>) -> impl View {
 
 fn main() {
     App::new()
-        .window("mitsuami showcase", Size::new(520.0, 620.0), || {
+        .window("mitsuami showcase", WindowSize::FitHeight(343.0), || {
             let log_lines = signal((1..=20).collect::<Vec<u32>>());
             Column::new().padding(Spacing::Xl).gap(Spacing::Xl).children((
                 counter(log_lines),

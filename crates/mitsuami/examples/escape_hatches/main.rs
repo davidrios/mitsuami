@@ -23,7 +23,7 @@ use mitsuami::prelude::*;
 
 fn main() {
     App::new()
-        .window("Escape hatches", Size::new(520.0, 360.0), || {
+        .window("Escape hatches", WindowSize::FitHeight(520.0), || {
             provide(store::Review::new());
             Column::new().padding(Spacing::Xl).child(screen::screen())
         })

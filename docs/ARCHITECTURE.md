@@ -156,6 +156,7 @@ enum Length {
 - `em`/`rem`/`vw`/`vh`/`Token` are resolved in core before handing styles to Taffy, which only knows length, percent and auto. Core tracks which nodes depend on the viewport or on font size, so a window resize or a system text-size change re-resolves only those nodes.
 - `Token` gives platform-appropriate spacing. For example, `Spacing::Md` can be 8pt on macOS, 12 epx on WinUI and 6/12px on GNOME. The backend provides the values through `PlatformMetrics`.
 - Ergonomics: `16.px()`, `1.5.em()`, `50.pct()`, `100.vw()`, `1.fr()`, `Spacing::Md`.
+- **Windows can fit their height to the content:** `WindowSize::FitHeight(width)`. Control heights differ per platform, so the same content adds up to a different height on each one. Core lays the window out once at max-content height, then sends that height through the ordinary `SetWindowSize`, so backends need nothing new. Fitting happens at the window's first layout only; after that it's an ordinary window that the user can resize and that doesn't jump when content comes and goes. Platforms size windows in physical pixels, so the size they report back can differ from the requested one by a fraction of a point.
 
 ### Responsive / adaptive
 

@@ -30,7 +30,7 @@ pub use custom::{Composed, Custom, CustomProps, CustomView, CustomWidget, Drawn,
 pub use draw::{Canvas, Color, DisplayList, Path, Shape};
 pub use element::{Element, ElementBuilder};
 pub use flow::{For, Show};
-pub use geometry::{Point, Rect, Size};
+pub use geometry::{Point, Rect, Size, WindowSize};
 pub use style::{Align, Display, FlexDirection, GridPlacement, Justify, Style, TextDirection, Track, repeat};
 pub use ui::{NodeInfo, Ui, WeakUi};
 pub use units::{Length, LengthExt, Spacing};

@@ -531,6 +531,34 @@ async fn window_resizes_relayout_the_content(app: TestApp) {
 }
 
 #[mitsuami_test::test]
+async fn windows_can_fit_their_height_to_the_content(app: TestApp) {
+    let ui = app.ui().clone();
+    let window = ui.create_window("fitted", WindowSize::FitHeight(300.0));
+    let root = Owner::new_root()
+        .with(|| Column::new().padding(10).children((Container::new().height(40), Text::new("fits"))).build(&ui));
+    ui.append_child(window, root);
+    app.settle().await;
+
+    // The text's height is the platform's, so only the fixed parts are known.
+    let size = ui.window_size(window).unwrap();
+    assert_eq!(size.width, 300.0);
+    assert!(size.height > 60.0, "the text adds to the fixed 60: {size:?}");
+    // Up to a pixel of slack: platforms size windows in physical pixels.
+    let slack = size.height - ui.frame(root).unwrap().height();
+    assert!((0.0..1.0).contains(&slack), "the content fills the fitted window: {slack} left");
+    match ui.capture(window).await {
+        Err(CaptureError::Unsupported) => assert!(app.is_headless(), "only headless may lack capture"),
+        Err(e) => panic!("capture failed: {e:?}"),
+        Ok(image) => {
+            let scale = image.scale_factor;
+            assert_eq!((image.width, image.height), ((300.0 * scale) as u32, (size.height * scale) as u32));
+        }
+    }
+    ui.destroy(window);
+    app.settle().await;
+}
+
+#[mitsuami_test::test]
 async fn windows_can_be_captured_at_backing_scale(app: TestApp) {
     app.mount(|| Text::new("pixels"));
     match app.ui().capture(app.window()).await {

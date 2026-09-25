@@ -15,7 +15,7 @@ use crate::a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
 use crate::backend::{AvailableSpace, Backend, EventSink, MeasureRequest, NativeState, PlatformMetrics};
 use crate::command::{Command, EventValue, UiEvent};
 use crate::custom::CustomProps;
-use crate::geometry::{Point, Rect, Size};
+use crate::geometry::{Point, Rect, Size, WindowSize};
 use crate::services::{Alert, MenuBar, OpenFile, SaveFile, ServiceError, Services, reply_future};
 use crate::style::{Align, Display, FlexDirection, Style, TextDirection};
 use crate::task::{Clock, Executor, Sleep, TaskHandle};
@@ -43,6 +43,8 @@ struct Node {
     frame: Rect,
     /// Windows only: content size.
     window_size: Size,
+    /// Windows only: the height is still to be fitted to the content.
+    fit_height: bool,
     /// ScrollViews only: how far the content is scrolled.
     scroll_offset: Point,
 }
@@ -364,6 +366,7 @@ impl Ui {
                     taffy,
                     frame: Rect::ZERO,
                     window_size: Size::ZERO,
+                    fit_height: false,
                     scroll_offset: Point::ZERO,
                 },
             );
@@ -374,14 +377,24 @@ impl Ui {
         id
     }
 
-    pub fn create_window(&self, title: impl Into<String>, size: Size) -> NodeId {
+    /// A window fitting its height is sized at its first layout, so give it
+    /// its content before the next commit.
+    pub fn create_window(&self, title: impl Into<String>, size: impl Into<WindowSize>) -> NodeId {
         let id = self.create(WidgetKind::Window, vec![Prop::Title(title.into())]);
         let mut inner = self.inner.borrow_mut();
         let node = inner.nodes.get_mut(&id).expect("just created");
+        let (size, fit_height) = match size.into() {
+            WindowSize::Fixed(size) => (size, false),
+            WindowSize::FitHeight(width) => (Size::new(width, 0.0), true),
+        };
         node.window_size = size;
+        node.fit_height = fit_height;
         node.frame = Rect { origin: Point::ZERO, size };
         inner.windows.push(id);
-        inner.pending.push(Command::SetWindowSize { id, size });
+        // A fitted size is sent with the first frames.
+        if !fit_height {
+            inner.pending.push(Command::SetWindowSize { id, size });
+        }
         id
     }
 
@@ -1068,7 +1081,11 @@ impl Inner {
             if node.kind == WidgetKind::Window {
                 style.size = taffy::Size {
                     width: taffy::Dimension::length(node.window_size.width),
-                    height: taffy::Dimension::length(node.window_size.height),
+                    height: if node.fit_height {
+                        taffy::Dimension::auto()
+                    } else {
+                        taffy::Dimension::length(node.window_size.height)
+                    },
                 };
             }
             if self.taffy.style(t).ok() != Some(&style) {
@@ -1094,11 +1111,15 @@ impl Inner {
         for window in self.windows.clone() {
             let node = &self.nodes[&window];
             let Some(root) = node.taffy else { continue };
-            let size = node.window_size;
+            let (mut size, fit_height) = (node.window_size, node.fit_height);
             let Inner { taffy, backend, nodes, metrics, .. } = self;
             let available = taffy::Size {
                 width: taffy::AvailableSpace::Definite(size.width),
-                height: taffy::AvailableSpace::Definite(size.height),
+                height: if fit_height {
+                    taffy::AvailableSpace::MaxContent
+                } else {
+                    taffy::AvailableSpace::Definite(size.height)
+                },
             };
             let _ = taffy.compute_layout_with_measure(root, available, |input, _, context, style| {
                 taffy::compute_leaf_layout(
@@ -1126,6 +1147,16 @@ impl Inner {
                     },
                 )
             });
+            if fit_height {
+                size.height = self.taffy.layout(root).map_or(0.0, |l| l.size.height).ceil();
+                let node = self.nodes.get_mut(&window).unwrap();
+                node.window_size = size;
+                node.fit_height = false;
+                // The window's style takes the fitted height, and `vh`
+                // re-resolves against it.
+                self.styles_dirty = true;
+                self.pending.push(Command::SetWindowSize { id: window, size });
+            }
             self.nodes.get_mut(&window).unwrap().frame = Rect { origin: Point::ZERO, size };
             self.collect_frames(window);
         }

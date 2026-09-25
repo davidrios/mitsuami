@@ -63,7 +63,8 @@ pub mod prelude {
     };
     pub use mitsuami_core::{
         Align, ButtonVariant, Children, Element, ElementBuilder, FlexDirection, For, GridPlacement, Justify, Length,
-        LengthExt, NodeId, Point, Role, Show, Size, Spacing, TextDirection, TextStyle, Track, Ui, View, repeat,
+        LengthExt, NodeId, Point, Role, Show, Size, Spacing, TextDirection, TextStyle, Track, Ui, View, WindowSize,
+        repeat,
     };
     pub use mitsuami_reactive::{
         Computed, IntoValue, Owner, Signal, Value, batch, computed, effect, inject, on_cleanup, provide, signal,
