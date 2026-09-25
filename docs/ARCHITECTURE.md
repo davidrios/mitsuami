@@ -309,7 +309,7 @@ NativeView::appkit(|cx: &mut AppKitCx| {
 
 Custom widgets come in three tiers. Pick the lowest that works:
 
-1. **Composition:** a component built from existing widgets. It runs everywhere.
+1. **Composition:** built from existing widgets. It runs everywhere, and it's the tier for what the canvas can't draw (text, editing). A plain component works; as a custom widget's render (`Renderer::composed`), it keeps the widget's props and events, so it can stand in for a native render.
 2. **Drawn:** a shared `Drawn` implementation using a small 2D API (`Canvas`: fill and stroke rects, rounded rects, ellipses and paths) with semantic colors (`Color::Accent`, `Color::Label`, …). It runs everywhere and follows dark mode and the accent color, but isn't truly native.
 3. **Native per platform:** one shared definition plus one render per platform.
 
@@ -354,7 +354,13 @@ impl Render for Rating {
 }
 ```
 
-- A usage site is `Rating::view(move || RatingProps::new(stars.get())).on_event(…)`, the same on every platform. `.drawn()` picks the drawn render where a native one exists.
+- A usage site is `Rating::view(move || RatingProps::new(stars.get())).on_event(…)`, the same on every platform. `.drawn()` and `.composed()` pick those renders where a native one exists.
+- **A widget native on one platform stands in on the others.** The renderer uses the first render it has: native, then drawn, then composed. A native render is either the platform's own control (`native::<W>()`) or built **ad hoc** from the platform's widgets the way that platform's apps build it (`ad_hoc::<W>()`), so it still looks at home. `Renderer::is_native()` is true only for the platform's own control, so a screen can be honest about it.
+- The `escape_hatches` example is one screen for every platform with three such widgets:
+  - a lock: native on GTK (`GtkLockButton`), composed elsewhere;
+  - a rating: native on macOS (`NSLevelIndicator`), ad hoc on GTK (star buttons, as GNOME Software builds it), drawn elsewhere;
+  - a pips pager: WinUI's, drawn until the WinUI backend renders it.
+- **A composed render** gets the props (reactive), a way to emit the widget's events, and the app's accessible label, which it puts on the control that stands for the widget. It builds as a plain container, so its built-in widgets carry the semantics.
 - **Compile-time coverage:** using a widget requires `Render`, and `Render` has to name a render that exists on the platform being built: a `NativeRender` impl or a `Drawn` one. A missing render doesn't build.
 - **Transport:** commands carry `WidgetKind::Custom(NAME)` and `Prop::Custom(CustomProps)`: the props as an `AnyValue` (type-erased, but still compared and printed with their own `PartialEq` and `Debug`) plus the widget's definition (semantics, action mapping, renders). Events come back as `UiEvent::Custom(AnyValue)`. Props don't need to be serializable. The native render travels with the props, so backends keep no registry.
 - **Semantics** come from `CustomWidget::a11y`; app overrides (`.a11y_label(…)`) win. Accessibility actions go to the native render first; if it doesn't handle one, the core emits the event `CustomWidget::action` maps it to. Drawn and native renders behave the same for assistive technology and tests.
@@ -437,7 +443,7 @@ Column::new().gap(Spacing::Md).padding(2.em()).children((
 
 | Widget | AppKit | WinUI 3 | GTK 4 |
 |---|---|---|---|
-| Window | NSWindow | Window | gtk::ApplicationWindow |
+| Window | NSWindow | Window | gtk::Window + HeaderBar |
 | Container / Row / Column / Grid | flipped NSView host | Canvas host | custom Widget host |
 | Text | NSTextField (label) | TextBlock | gtk::Label |
 | Button | NSButton | Button | gtk::Button |
@@ -640,9 +646,9 @@ This is exposed as `Backend::capture`.
 | **M0 — Core + test harness** ✅ | Workspace; `mitsuami-reactive`; node tree; styles and units; Taffy integration; `Command` protocol; headless backend; `mitsuami-test` basics (custom runner, a11y queries, actions, settle, tree/layout/wireframe snapshots) | Counter and a flex/grid form pass headless integration tests written with the public test API; the reactive suite passes |
 | **M0.5 — WinUI spike** (in parallel) | Throwaway, using windows-rs 0.100: a window, a Canvas, a Button, Click and Measure, driven imperatively | Integration route (a/b/c) chosen |
 | **M1 — AppKit** ✅ | Window, View hosts, Text, Button, TextInput, Checkbox, Switch; run-loop flush; measure; resize → relayout | The M0 tests pass with `--native` on macOS; conformance suite v1 passes; `Backend::capture` works and a first visual baseline exists |
-| **M2 — GTK 4** | The same widget set (developed and tested on Linux, e.g. a VM or CI) | The same tests and conformance suite pass with `--native` on Linux |
+| **M2 — GTK 4** ✅ | The same widget set (developed and tested on Linux, e.g. a VM or CI) | The same tests and conformance suite pass with `--native` on Linux |
 | **M3 — WinUI 3** | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
-| **M4 — Escape hatches** ✅ (AppKit) | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn fallback) | Demo has a mac-specific screen sharing a store, and a custom widget with three renders |
+| **M4 — Escape hatches** ✅ (AppKit, GTK) | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn and composed fallbacks) | Demo: one screen for every platform, with three custom widgets, each native on one platform and built ad hoc, drawn or composed on the others |
 | **M5 — Ergonomics** | `#[component]`, `view!`, stores, resources | Demo rewritten with macros |
 | **M6 — Visual review** | Stories, the variant matrix, perceptual diff, `cargo mitsuami visual review` HTML report, CI on three OSes | A PR that changes a widget shows up as a reviewable visual diff on all three platforms |
 
@@ -667,7 +673,7 @@ Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, d
 | Platform vs runtime checks | Platform is compile-time (`platform!`); capabilities are runtime |
 | Testing | No unit tests. Integration (headless) + e2e (native) with one API; a11y-driven queries and actions; Chromatic-style visual regression; testing toolkit shipped to users |
 
-## 16. Implementation notes (M1 and the contract work)
+## 16. Implementation notes
 
 Things the AppKit backend taught us, some of them now part of the contract:
 
@@ -692,9 +698,40 @@ Things the AppKit backend taught us, some of them now part of the contract:
 - **Synthesized clicks** (`SyntheticInput::Click`) are for drawn widgets only. Native controls track the mouse in a loop of their own, waiting for real events; tests drive them with accessibility actions.
 - The drawn render sizes its stars from the body font, so it sits close to the native rating control. Headless wireframes draw display lists, so drawn widgets show up in reviews without pixels.
 
+### M2 (GTK 4)
+
+What the GTK 4 backend taught us:
+
+- **Tests run on a private Broadway display.** The runner starts `gtk4-broadwayd` (bound to localhost) and points GDK at it, unless `MITSUAMI_SHOW_WINDOWS=1`. GTK needs a real, mapped window to capture and to track focus, and on the session display a tiling compositor would override window sizes. The display prints its address, so tests can be watched in a browser.
+- **Windows get an explicit `HeaderBar`.** GTK's default size includes the titlebar. With a header bar of our own, its height is known, and the content gets exactly the size the core asks for.
+- **Layout hosts allocate each child at its core frame**, and ask for exactly their own frame (window content hosts ask for nothing, so windows can shrink). Frames live in one map shared by all hosts, so a child keeps its frame when it moves to another parent (the core only resends frames that change). Leaves with an empty frame are hidden from GTK's allocation: controls can't be allocated smaller than their padding.
+- **The Tab order is the window content host's `focus` vfunc.** Tab and Shift+Tab walk the core's order and wrap around; arrow keys keep GTK's geometric behaviour. The Tab conformance tests were confirmed to fail with GTK's own order.
+- **Programmatic changes are muted.** GTK emits `toggled`, `notify::active` and `changed` for `set_active`/`set_text` too, so events are dropped while the backend applies commands.
+- **Input is synthesized with keybinding signals** (answering the M1 open question): GTK 4 can't inject key events, so keys become the signals they are bound to, on the widgets that handle them: `insert-at-cursor`, `backspace` and `activate` on the entry's text widget, and `move-focus` on the window for Tab.
+- **Button presses call `clicked` directly.** `gtk_widget_activate` would click only after the press animation, asynchronously.
+- **Min-content text works here:** a wrapping `GtkLabel` reports its longest word as its minimum width.
+- **Captures use the Cairo renderer**, whichever renderer the display uses, so baselines don't depend on the GPU. The content host carries the `background` style class, so captures include the window background.
+- **Text styles map to GNOME's type scale** (`title-1`, `title-2`, `heading`, `caption`, `monospace`). GNOME has no callout size, so callouts use the body size.
+- **Focus is tracked on the window** (`notify::focus-widget`), resolved to the nearest known node: an entry's focus sits on its inner text widget.
+- **Scroll views are a `ScrolledWindow` around a `Viewport`.** Content hosts measure as their frame, so the viewport learns the content size. The adjustments are updated as soon as frames arrive, because a `ScrollTo` in the same commit needs the new range before GTK allocates.
+- **Capture replies from the frame clock** (`after-paint` of the next frame), and the test executor lets the backend run while a test awaits. `TestHooks::settle` was added to the contract for this: platforms that complete work asynchronously catch up there.
+- **Broadway frames stall without a browser** after a paint, until something new is drawn, so nothing may wait for two frames in a row.
+- **The test display has portals off** (`GDK_DEBUG=no-portals`): otherwise file dialogs open on the real desktop, and its dark mode and fonts leak into tests.
+- **Menus go in the header bar** (GNOME's primary menu button): one labelled section per app menu, then Quit (Ctrl+Q, which asks every window to close). Shortcuts are installed in every window. GTK's text widgets have their own Cut/Copy/Paste context menus, so there's no Edit menu.
+- **Alerts** use `gtk::AlertDialog`: Escape chooses the last button. GTK has no alert styles, so `AlertStyle` is ignored.
+- Not done yet: the `adwaita` feature, a reduced GTK 4.8 mode, and `gtk::Application` integration (single instance, app ID). `run` drives a plain GLib main loop.
+
+### M4 on GTK
+
+- **Custom widgets and native views on GTK** follow AppKit's shape: `mitsuami_gtk::NativeRender` (a `gtk::Widget` per render, measured by GTK unless the render measures itself), `NativeView::gtk(factory)`, and `mitsuami::gtk::gtk` for the bindings. GTK signals fire on programmatic updates, so custom events are muted while the backend applies props, like `Changed`.
+- **Drawn widgets are a `DrawingArea` rasterized with Cairo.** Semantic colors come from the theme's named colors (`accent_color`, `borders`, …), with Adwaita's values as a fallback, so they follow the theme. Pointer events come from a click gesture; `SyntheticInput::Click` emits the gesture's own `pressed`/`released`, since GTK 4 can't inject pointer events.
+- **Native views' accessibility actions** do what GTK's do: `activate` for Activate, and a step for spin buttons and ranges.
+- **Only real platform controls count as native.** GTK has no rating control, so the example's rating is built ad hoc there, from flat buttons with `starred-symbolic` icons like GNOME Software's, and isn't labelled native. GTK's own widget in the example is `GtkLockButton`.
+- **`GtkLockButton` is deprecated since GTK 4.10** and gone in GTK 5, but it's in every GTK 4. It shows a `GPermission`, and gtk4-rs can't subclass one, so the example registers a small one through GIO's C API: it reports what the props say, and acquiring or releasing just succeeds. The button's click is the request the app answers, like any controlled widget.
+- **Focus requests wait for the structure.** `Ui::focus` right after building a node (a composed field focusing itself) used to reach the backend before the node was in a window, where no toolkit can focus it; headless didn't mind. Focus commands now go at the end of the batch's structure.
+
 ## 17. Open questions
 
 - The exact Windows floor for Windows App SDK 2.4.
 - Whether `windows-reactor` allows imperative element access (answered by the M0.5 spike).
 - Visual baseline storage: git LFS is fine to start with. Revisit when baseline volume grows (3 platforms × variants × stories).
-- How much native input synthesis GTK 4 allows for e2e raw-input tests. GTK 4 restricts synthesised events, so we may need AT-SPI or in-process event injection.

@@ -1,12 +1,11 @@
-//! A star rating: one shared definition, three renders.
-//!
-//! - Native on macOS: `NSLevelIndicator` in its rating style (`macos.rs`).
-//! - Drawn everywhere else, until GTK and WinUI have native renders, and
-//!   wherever `.drawn()` asks for it.
-//! - Composed from buttons ([`composed`]): the tier that needs no render at all.
+//! A star rating, the macOS widget: `NSLevelIndicator` in its rating style
+//! (`macos.rs`). GTK has no rating control, so there it's built ad hoc the
+//! way GNOME Software builds one (`linux.rs`). Elsewhere it's drawn.
 
 use mitsuami::prelude::*;
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -102,21 +101,8 @@ impl Render for Rating {
     fn renderer() -> Renderer<Self> {
         platform! {
             macos => mitsuami::appkit::native::<Self>().with_drawn(),
+            linux => mitsuami::gtk::ad_hoc::<Self>().with_drawn(),
             _ => Renderer::drawn(),
         }
     }
-}
-
-/// The same rating composed from plain buttons: runs everywhere, no render.
-pub fn composed(value: impl Fn() -> u8 + Copy + 'static, on_change: impl Fn(u8) + Copy + 'static) -> impl View {
-    Row::new().gap(Spacing::Xs).children(
-        (1..=crate::store::MAX_STARS)
-            .map(|n| {
-                Button::new(move || if n <= value() { "★" } else { "☆" }.to_string())
-                    .variant(ButtonVariant::Plain)
-                    .a11y_label(if n == 1 { "1 star".to_string() } else { format!("{n} stars") })
-                    .on_click(move || on_change(n))
-            })
-            .collect::<Vec<_>>(),
-    )
 }

@@ -73,6 +73,9 @@ struct Inner {
     taffy: TaffyTree<NodeId>,
     next_id: u32,
     pending: Vec<Command>,
+    /// Focus requests, sent after the structure of the batch: a node focused
+    /// right after it's built isn't in a window yet.
+    pending_focus: Vec<NodeId>,
     windows: Vec<NodeId>,
     styles_dirty: bool,
     resync: BTreeSet<NodeId>,
@@ -145,6 +148,7 @@ impl Ui {
                 taffy: TaffyTree::new(),
                 next_id: 1,
                 pending: Vec::new(),
+                pending_focus: Vec::new(),
                 windows: Vec::new(),
                 styles_dirty: true,
                 resync: BTreeSet::new(),
@@ -488,7 +492,7 @@ impl Ui {
     }
 
     pub fn focus(&self, id: NodeId) {
-        self.inner.borrow_mut().pending.push(Command::Focus { id });
+        self.inner.borrow_mut().pending_focus.push(id);
         self.changed();
     }
 
@@ -628,6 +632,11 @@ impl Ui {
         }
         inner.resync_all();
         inner.sync_focus_orders();
+        for id in std::mem::take(&mut inner.pending_focus) {
+            if inner.nodes.contains_key(&id) {
+                inner.pending.push(Command::Focus { id });
+            }
+        }
         let batch = std::mem::take(&mut inner.pending);
         if !batch.is_empty() {
             inner.backend.apply(&batch);

@@ -1,10 +1,14 @@
 //! Escape hatches: `platform!`, custom widgets (native, drawn, composed) and
 //! native views. The views under test are the `escape_hatches` example's.
 
+#[path = "../examples/escape_hatches/lock/mod.rs"]
+mod lock;
+#[path = "../examples/escape_hatches/pips_pager.rs"]
+mod pips_pager;
 #[path = "../examples/escape_hatches/rating/mod.rs"]
 mod rating;
-#[path = "../examples/escape_hatches/review/mod.rs"]
-mod review;
+#[path = "../examples/escape_hatches/screen.rs"]
+mod screen;
 #[path = "../examples/escape_hatches/store.rs"]
 mod store;
 
@@ -13,6 +17,8 @@ use mitsuami::core::{Color, Prop, WidgetKind};
 use mitsuami::prelude::*;
 use mitsuami_test::prelude::*;
 
+use lock::{Lock, LockEvent, LockProps};
+use pips_pager::{PipsPager, PipsPagerEvent, PipsPagerProps};
 use rating::{Rating, RatingEvent, RatingProps};
 use store::Review;
 
@@ -102,10 +108,11 @@ async fn read_only_ratings_ignore_actions(app: TestApp) {
 }
 
 #[mitsuami_test::test]
-async fn native_renders_are_measured(app: TestApp) {
+async fn ratings_are_measured(app: TestApp) {
     let stars = signal(2);
     app.mount(move || Row::new().child(rating(stars, "Your rating")));
-    // Natively, the level indicator's own size; headless, the drawn one.
+    // On macOS, the level indicator's own size; elsewhere and headless, the
+    // drawn one.
     let frame = app.get_by_role(Role::Slider, "Your rating").frame();
     assert!(frame.width() > frame.height() * 3.0 && frame.height() > 0.0, "{frame}");
 }
@@ -167,24 +174,6 @@ async fn drawings_follow_the_size(app: TestApp) {
 }
 
 #[mitsuami_test::test]
-async fn the_three_renders_stay_in_sync(app: TestApp) {
-    let review = mount_with_review(&app, review::renders);
-    app.get_by_role(Role::Button, "4 stars").click().await;
-    assert_eq!(review.stars.get_untracked(), 4);
-    app.expect(by_role(Role::Slider, "Native rating")).to_have_value("4 of 5").await;
-    app.expect(by_role(Role::Slider, "Drawn rating")).to_have_value("4 of 5").await;
-    assert_eq!(filled_stars(&app, by_role(Role::Slider, "Drawn rating")), 4);
-
-    app.get_by_role(Role::Slider, "Native rating").decrement().await;
-    let shows = |name: &str, star: &str| {
-        app.get_by_role(Role::Button, name).native_state().props.contains(&Prop::Label(star.into()))
-    };
-    assert!(shows("3 stars", "★") && shows("4 stars", "☆"));
-    app.assert_wireframe_snapshot("three renders");
-    app.assert_visual_snapshot("three renders").await;
-}
-
-#[mitsuami_test::test]
 async fn custom_widgets_are_destroyed_with_their_subtree(app: TestApp) {
     let shown = signal(true);
     app.mount(move || {
@@ -198,27 +187,123 @@ async fn custom_widgets_are_destroyed_with_their_subtree(app: TestApp) {
     assert_eq!(app.native_node_count(), before - 3);
 }
 
-// ------------------------------------------------------------------ screens
+// ------------------------------------------------------------------- lock
 
-#[mitsuami_test::test]
-async fn the_shared_screen_drives_the_store(app: TestApp) {
-    let review = mount_with_review(&app, review::shared::review_screen);
-    app.expect(by_role(Role::Button, "Submit")).to_be_disabled().await;
-    app.get_by_role(Role::Slider, "Your rating").fill("4").await;
-    app.get_by_label("Comment").type_text("Nice").await;
-    app.get_by_role(Role::Button, "Submit").click().await;
-    assert_eq!(review.stars.get_untracked(), 4);
-    app.expect(by_text("Thanks for the 4 stars: “Nice”")).to_be_visible().await;
+fn lock(locked: Signal<bool>) -> mitsuami::core::Custom<Lock> {
+    Lock::view(move || LockProps { locked: locked.get() }).a11y_label("Lock").on_event(move |event| {
+        locked.set(*event == LockEvent::LockRequested);
+    })
 }
 
-/// The screen `platform!` picks: on macOS, the Mac one.
 #[mitsuami_test::test]
-async fn the_platform_screen_drives_the_same_store(app: TestApp) {
-    let review = mount_with_review(&app, review::review_screen);
-    app.get_by_role(Role::Slider, "Your rating").increment().await;
+async fn locks_ask_and_the_app_decides(app: TestApp) {
+    let locked = signal(true);
+    let requests = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let log = requests.clone();
+    app.mount(move || {
+        // An app that says no to locking again.
+        Row::new().child(Lock::view(move || LockProps { locked: locked.get() }).a11y_label("Lock").on_event(
+            move |event| {
+                log.borrow_mut().push(event.clone());
+                if *event == LockEvent::UnlockRequested {
+                    locked.set(false);
+                }
+            },
+        ))
+    });
+    let button = app.get_by_role(Role::Button, "Lock");
+    assert_eq!(button.value().as_deref(), Some("Locked"));
+
+    button.click().await;
+    app.expect(by_role(Role::Button, "Lock")).to_have_value("Unlocked").await;
+    button.click().await;
+    // Refused: still unlocked, natively too (the mirror check reads it back).
+    app.expect(by_role(Role::Button, "Lock")).to_have_value("Unlocked").await;
+    assert_eq!(*requests.borrow(), [LockEvent::UnlockRequested, LockEvent::LockRequested]);
+}
+
+#[mitsuami_test::test]
+async fn composed_widgets_are_built_from_builtin_widgets(app: TestApp) {
+    let locked = signal(true);
+    app.mount(move || Row::new().child(lock(locked).composed()));
+
+    // A plain button, named by the app's label, showing what a click does.
+    let button = app.get_by_role(Role::Button, "Lock");
+    assert_eq!(button.native_state().kind, mitsuami::core::WidgetKind::Button);
+    assert!(button.native_state().props.contains(&Prop::Label("Unlock".into())));
+
+    // Its events reach the widget's handlers, and the new props show.
+    button.click().await;
+    assert!(!locked.get_untracked());
+    assert!(app.get_by_role(Role::Button, "Lock").native_state().props.contains(&Prop::Label("Lock".into())));
+}
+
+// ------------------------------------------------------------ pips pager
+
+fn pager(page: Signal<u8>) -> mitsuami::core::Custom<PipsPager> {
+    PipsPager::view(move || PipsPagerProps { count: 4, selected: page.get() })
+        .a11y_label("Page")
+        .on_event(move |PipsPagerEvent::Selected(p)| page.set(*p))
+}
+
+#[mitsuami_test::test]
+async fn pips_pagers_select_pages(app: TestApp) {
+    let page = signal(0);
+    app.mount(move || Row::new().child(pager(page)));
+    let pips = app.get_by_role(Role::Slider, "Page");
+    assert_eq!(pips.value().as_deref(), Some("Page 1 of 4"));
+
+    // The third pip: cells are as wide as the pager is tall.
+    let cell = pips.frame().height();
+    pips.click_at(cell * 2.5, cell / 2.0).await;
+    assert_eq!(page.get_untracked(), 2);
+    app.expect(by_role(Role::Slider, "Page")).to_have_value("Page 3 of 4").await;
+
+    pips.increment().await;
+    assert_eq!(page.get_untracked(), 3);
+    // Nothing past the last page.
+    let id = pips.id();
+    assert_eq!(app.ui().perform(id, &A11yAction::Increment), Err(mitsuami::core::ActionError::Unsupported));
+    pips.fill("1").await;
+    assert_eq!(page.get_untracked(), 0);
+}
+
+// ---------------------------------------------------------------- screen
+
+#[mitsuami_test::test]
+async fn each_platform_has_its_own_widget_native(app: TestApp) {
+    mount_with_review(&app, screen::screen);
+    let native: Vec<String> = ["Lock (native)", "Rating (native)", "Page (native)"]
+        .into_iter()
+        .filter(|label| app.get_by_text(*label).exists())
+        .map(String::from)
+        .collect();
+    let expected: &[&str] = platform! {
+        macos => &["Rating (native)"],
+        // The rating is built ad hoc there: not labelled native.
+        linux => &["Lock (native)"],
+        // The pager, once the WinUI backend (M3) renders it.
+        _ => &[],
+    };
+    assert_eq!(native, expected);
+    assert!(app.get_by_text("Rating").exists() || cfg!(target_os = "macos"));
+}
+
+#[mitsuami_test::test]
+async fn the_screen_drives_the_store(app: TestApp) {
+    let review = mount_with_review(&app, screen::screen);
+    app.expect(by_text("Click the lock to make changes")).to_be_visible().await;
+    let rating = app.ui().perform(app.get_by_role(Role::Slider, "Rating").id(), &A11yAction::Increment);
+    assert!(rating.is_err(), "locked: the rating can't change");
+
+    app.get_by_role(Role::Button, "Lock").click().await;
+    app.get_by_role(Role::Slider, "Rating").fill("4").await;
+    app.get_by_role(Role::Slider, "Page").increment().await;
+    app.expect(by_text(screen::NOTES[1])).to_be_visible().await;
+
     app.get_by_role(Role::Button, "Submit").click().await;
-    assert_eq!(review.stars.get_untracked(), 1);
-    app.expect(by_text("Thanks for the 1 stars!")).to_be_visible().await;
+    assert_eq!(review.stars.get_untracked(), 4);
+    app.expect(by_text("Thanks for the 4 stars!")).to_be_visible().await;
     app.assert_visual_snapshot("submitted").await;
 }
 
@@ -231,13 +316,11 @@ mod native_views {
 
     use mitsuami::appkit::NativeView;
     use mitsuami::appkit::objc2::rc::Retained;
-    use mitsuami::appkit::objc2_app_kit::NSButton;
+    use mitsuami::appkit::objc2_app_kit::{NSButton, NSStepper};
     use mitsuami::appkit::objc2_foundation::NSString;
     use mitsuami::core::{Prop, WidgetKind};
     use mitsuami::prelude::*;
     use mitsuami_test::prelude::*;
-
-    use super::{mount_with_review, review};
 
     #[mitsuami_test::test]
     async fn native_views_are_created_measured_and_updated(app: TestApp) {
@@ -274,7 +357,21 @@ mod native_views {
 
     #[mitsuami_test::test]
     async fn native_views_report_their_events(app: TestApp) {
-        let review = mount_with_review(&app, review::macos::stars_stepper);
+        let stars = signal(0u8);
+        app.mount(move || {
+            NativeView::appkit(|cx| {
+                let stepper = NSStepper::new(cx.mtm());
+                stepper.setMinValue(0.0);
+                stepper.setMaxValue(5.0);
+                stepper.setIncrement(1.0);
+                let emitter = cx.emitter();
+                cx.on_action(&*stepper, move |stepper: &NSStepper| emitter.emit(stepper.doubleValue().round() as u8));
+                stepper
+            })
+            .update(stars, |stepper, stars| stepper.setDoubleValue(*stars as f64))
+            .on_event(move |value: &u8| stars.set(*value))
+            .a11y_label("Stars")
+        });
         if app.is_headless() {
             return;
         }
@@ -282,9 +379,82 @@ mod native_views {
         // comes back as an event the view handles.
         app.get_by_label("Stars").increment().await;
         app.get_by_label("Stars").increment().await;
-        assert_eq!(review.stars.get_untracked(), 2);
+        assert_eq!(stars.get_untracked(), 2);
         app.get_by_label("Stars").decrement().await;
-        assert_eq!(review.stars.get_untracked(), 1);
+        assert_eq!(stars.get_untracked(), 1);
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod native_views {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use mitsuami::core::{Prop, WidgetKind};
+    use mitsuami::gtk::NativeView;
+    use mitsuami::gtk::gtk;
+    use mitsuami::gtk::gtk::prelude::*;
+    use mitsuami::prelude::*;
+    use mitsuami_test::prelude::*;
+
+    #[mitsuami_test::test]
+    async fn native_views_are_created_measured_and_updated(app: TestApp) {
+        let title = signal("First".to_string());
+        let button: Rc<RefCell<Option<gtk::Button>>> = Rc::default();
+        let created = button.clone();
+        app.mount(move || {
+            Row::new().child(
+                NativeView::gtk(move |_| {
+                    let button = gtk::Button::new();
+                    *created.borrow_mut() = Some(button.clone());
+                    button
+                })
+                .measure(|_, _| Size::new(120.0, 30.0))
+                .update(title, |button, title| button.set_label(title))
+                .a11y_label("Raw button"),
+            )
+        });
+        let node = app.get_by_label("Raw button");
+        assert_eq!(node.native_state().kind, WidgetKind::Native);
+        assert!(node.native_state().props.iter().any(|p| matches!(p, Prop::Native(_))));
+        if app.is_headless() {
+            // No native view to create: an empty box.
+            assert!(button.borrow().is_none());
+            return;
+        }
+        assert_eq!(node.frame().size, Size::new(120.0, 30.0));
+        let button = button.borrow().clone().expect("created natively");
+        assert_eq!(button.label().as_deref(), Some("First"));
+        title.set("Second".into());
+        app.settle().await;
+        assert_eq!(button.label().as_deref(), Some("Second"));
+    }
+
+    #[mitsuami_test::test]
+    async fn native_views_report_their_events(app: TestApp) {
+        let stars = signal(0u8);
+        app.mount(move || {
+            NativeView::gtk(|cx| {
+                let spin = gtk::SpinButton::with_range(0.0, 5.0, 1.0);
+                let emitter = cx.emitter();
+                spin.connect_value_changed(move |spin| emitter.emit(spin.value() as u8));
+                spin
+            })
+            // Setting the value from the app is not an event.
+            .update(stars, |spin, stars| spin.set_value(*stars as f64))
+            .on_event(move |value: &u8| stars.set(*value))
+            .a11y_label("Stars")
+        });
+        if app.is_headless() {
+            return;
+        }
+        // Accessibility increments step the spin button; its signal comes
+        // back as an event the view handles.
+        app.get_by_label("Stars").increment().await;
+        app.get_by_label("Stars").increment().await;
+        assert_eq!(stars.get_untracked(), 2);
+        app.get_by_label("Stars").decrement().await;
+        assert_eq!(stars.get_untracked(), 1);
     }
 }
 

@@ -7,10 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish = false
 
 [dependencies]
 mitsuami-core.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk.workspace = true
+libc.workspace = true
+
+[[test]]
+name = "services"
+harness = false
 
 [lints]
 workspace = true

@@ -21,5 +21,8 @@ png.workspace = true
 mitsuami-appkit.workspace = true
 objc2.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+mitsuami-gtk.workspace = true
+
 [lints]
 workspace = true

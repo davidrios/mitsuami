@@ -132,10 +132,20 @@ pub trait NativeRender: CustomWidget {
     }
 }
 
-/// The renderer for a widget with an AppKit render.
+/// The renderer for a widget whose AppKit render is AppKit's own control.
 pub fn native<W: NativeRender>() -> Renderer<W> {
+    Renderer::native(erased::<W>())
+}
+
+/// The renderer for a widget AppKit has no control for, built ad hoc from
+/// AppKit views the way Mac apps build it. Not labelled native.
+pub fn ad_hoc<W: NativeRender>() -> Renderer<W> {
+    Renderer::ad_hoc(erased::<W>())
+}
+
+fn erased<W: NativeRender>() -> Opaque {
     let render: Rc<dyn ErasedRender> = Rc::new(RenderImpl::<W>(PhantomData));
-    Renderer::native(Opaque::new("appkit render", render))
+    Opaque::new("appkit render", render)
 }
 
 /// [`NativeRender`] with the types erased, as the backend holds it.

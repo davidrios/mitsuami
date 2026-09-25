@@ -25,7 +25,7 @@ pub use app::{init_for_tests, run};
 #[cfg(target_os = "macos")]
 pub use backend::{AppKitBackend, AppKitHandle, BackendOptions};
 #[cfg(target_os = "macos")]
-pub use custom::{AppKitCx, Emitter, NativeRender, NativeView, native};
+pub use custom::{AppKitCx, Emitter, NativeRender, NativeView, ad_hoc, native};
 #[cfg(target_os = "macos")]
 pub use services::AppKitServices;
 

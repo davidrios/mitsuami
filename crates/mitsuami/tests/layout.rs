@@ -275,7 +275,10 @@ async fn toggles_keep_their_natural_width_in_a_column(app: TestApp) {
 async fn toggles_follow_explicit_alignment(app: TestApp) {
     app.mount(|| {
         Column::new().width(400).children((
-            Grid::new().width(400).columns([1.fr()]).child(Switch::new("Grid").test_id("grid").justify_self(Align::End)),
+            Grid::new()
+                .width(400)
+                .columns([1.fr()])
+                .child(Switch::new("Grid").test_id("grid").justify_self(Align::End)),
             Column::new().width(400).align(Align::Center).child(Switch::new("Column").test_id("column")),
         ))
     });

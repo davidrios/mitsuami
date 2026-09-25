@@ -16,6 +16,9 @@ mitsuami-widgets.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 mitsuami-appkit.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+mitsuami-gtk.workspace = true
+
 [dev-dependencies]
 mitsuami-test.workspace = true
 

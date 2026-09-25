@@ -2,7 +2,7 @@
 
 This guide is for writing a platform backend: GTK 4 (`mitsuami-gtk`), WinUI 3 (`mitsuami-winui`), or any other.
 
-**Working reference:** the AppKit backend (`crates/mitsuami-appkit`). Every rule here is enforced by the test suites, and many were learned the hard way.
+**Working references:** the AppKit backend (`crates/mitsuami-appkit`) and the GTK 4 backend (`crates/mitsuami-gtk`). Every rule here is enforced by the test suites, and many were learned the hard way.
 
 **Background:** read [ARCHITECTURE.md](ARCHITECTURE.md) §2–§5 first.
 
@@ -22,7 +22,7 @@ The backend **never lays anything out** and **never calls back into the `Ui`** f
 |---|---|---|
 | `Backend` | `mitsuami_core::Backend` | `mitsuami-appkit/src/backend.rs` |
 | `Services` (clipboard, dialogs, menus) | `mitsuami_core::services::Services` | `mitsuami-appkit/src/services.rs` |
-| `TestHooks` on your shareable handle | `mitsuami_core::TestHooks` | `impl TestHooks for AppKitHandle` |
+| `TestHooks` on your shareable handle | `mitsuami_core::TestHooks` | `impl TestHooks for AppKitHandle` (`settle` is only needed where the platform works asynchronously: see `GtkHandle`) |
 | `run(setup)`: the app's run loop | your crate | `mitsuami-appkit/src/app.rs` |
 | `init_for_tests()` | your crate | same file |
 
@@ -62,9 +62,9 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 
 ### Widget kinds
 
-| Kind | AppKit (done) | GTK 4 (suggested) | WinUI 3 (suggested) |
+| Kind | AppKit (done) | GTK 4 (done) | WinUI 3 (suggested) |
 |---|---|---|---|
-| `Window` | `NSWindow` + flipped content host | `gtk::ApplicationWindow` + host as child | `Window` + `Canvas` as `Content` |
+| `Window` | `NSWindow` + flipped content host | `gtk::Window` + `HeaderBar` + host as child (done) | `Window` + `Canvas` as `Content` |
 | `Container` (layout host) | flipped `NSView` subclass | `gtk::Widget` subclass that allocates children at given frames (or `gtk::Fixed`) | `Canvas` (`Canvas.Left/Top`, `Width/Height`) |
 | `Text` | `NSTextField` wrapping label | `gtk::Label` (wrap on, `xalign 0`) | `TextBlock` (`TextWrapping.Wrap`) |
 | `Button` | `NSButton` push | `gtk::Button` | `Button` |
@@ -72,9 +72,9 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 | `Checkbox` | `NSButton` checkbox | `gtk::CheckButton` | `CheckBox` |
 | `Switch` | `NSSwitch` | `gtk::Switch` | `ToggleSwitch` |
 | `ScrollView` | `NSScrollView` | `gtk::ScrolledWindow` | `ScrollViewer` |
-| `Custom` (native render) | the render's view (`NativeRender`) | the render's widget | the render's element |
-| `Custom` (drawn) | `DrawnView`: flipped `NSView` that rasterizes the display list | a `gtk::DrawingArea` / snapshot with Cairo or GSK | a `Canvas` with Win2D, or `Microsoft.UI.Composition` shapes |
-| `Native` | the app's `NSView` (`NativeView::appkit`) | the app's `gtk::Widget` | the app's `FrameworkElement` |
+| `Custom` (native render) | the render's view (`NativeRender`) | the render's widget (`mitsuami_gtk::NativeRender`) | the render's element |
+| `Custom` (drawn) | `DrawnView`: flipped `NSView` that rasterizes the display list | a `gtk::DrawingArea` rasterized with Cairo | a `Canvas` with Win2D, or `Microsoft.UI.Composition` shapes |
+| `Native` | the app's `NSView` (`NativeView::appkit`) | the app's `gtk::Widget` (`NativeView::gtk`) | the app's `FrameworkElement` |
 
 ### Props
 
@@ -156,8 +156,10 @@ These make one test suite run against every backend.
 - **`native_state(id)`**: **read back from the widget** what it actually shows: text, title, value, placeholder, checked, enabled, frame, children (in native order), focused, and scroll offset. Only cache what the platform can't report (AppKit caches the text style and variant). After every settle, the test harness compares this with the core and fails on any difference. This check has caught every serious backend bug so far.
 - **`capture(id, reply)`**: offscreen RGBA8 at backing scale, rows top to bottom. Reply when the image is ready, right away if possible. Examples:
   - AppKit: `cacheDisplayInRect:toBitmapImageRep:`, which replies immediately.
-  - GTK: `gtk::WidgetPaintable` + snapshot + `render_texture`, then download.
+  - GTK: `gtk::WidgetPaintable` + snapshot + `render_texture` (Cairo renderer), then download. Replies from the frame clock's `after-paint`, once the widget is mapped and laid out.
   - WinUI: `RenderTargetBitmap.RenderAsync`, then `GetPixelsAsync`, replying from the completion.
+
+**`TestHooks::settle`** runs after every settle and while a test awaits something the platform completes (a capture). Use it to let the platform catch up without blocking: GTK presents windows there and dispatches what its main context has ready (allocations, adjustments, focus). AppKit does everything synchronously and leaves it empty.
 
 ## 8. Services
 
@@ -178,7 +180,7 @@ Implement `Services`. **Never block**: reply later, from the platform's completi
 
 ## 8a. Escape hatches: custom widgets and native views
 
-The core does the shared work; a backend supplies three things. AppKit's are in `mitsuami-appkit/src/custom.rs`.
+The core does the shared work; a backend supplies three things. AppKit's are in `mitsuami-appkit/src/custom.rs`, GTK's in `mitsuami-gtk/src/custom.rs`.
 
 1. **A `NativeRender` trait** for custom widgets, in your crate, shaped like AppKit's: `type View`, `create(props, cx)`, `update(view, old, new)`, and optional `measure`, `read` (read the props back from the widget, for the mirror check) and `perform`. Provide `native::<W>() -> Renderer<W>`: wrap a type-erased render in an `Opaque` and pass it to `Renderer::native`. On `Create` of `Custom(_)`, `find_prop!(props, Custom)`: if `custom.native()` is `Some`, downcast it to your render and create the view; otherwise the widget is drawn.
 2. **A drawn view** that rasterizes `DisplayList`s (fill and stroke of rects, rounded rects, ellipses and paths) with the platform's 2D API. Resolve the semantic `Color`s at draw time, so they follow the appearance. Report primary-button `Pointer` down/up in the widget's coordinates, and support `SyntheticInput::Click`. Don't measure drawn widgets (the core does); `native_state` reports `Custom` and `Drawing` as last received.
@@ -194,7 +196,7 @@ Also:
 `SetFocusOrder` gives the window-wide order. Platforms differ in how to impose it:
 
 - **AppKit:** turn off `autorecalculatesKeyViewLoop` and link `nextKeyView` into a loop.
-- **GTK 4:** there is no "next widget" pointer. Handle Tab and Shift+Tab in a capture-phase key controller on the window, then `grab_focus` the next widget in the order that is focusable, sensitive and visible.
+- **GTK 4:** there is no "next widget" pointer. The window's content host overrides the `focus` vfunc: for Tab and Shift+Tab it `grab_focus`es the next widget in the order that accepts focus, wrapping around; other directions keep GTK's behaviour.
 - **WinUI:** set `TabIndex` to each control's position in the order. Make sure one focus scope covers the window (check `TabFocusNavigation` on the hosts).
 
 The conformance tests use three controls arranged so that reading order and position on screen disagree (RTL rows, absolute positioning, `tab_index`). An order based on position fails them, as it should.
@@ -266,6 +268,6 @@ cargo run -p mitsuami --example showcase        # look at it
 6. `run()` with tick, waker and timer → `run_loop_smoke` exits by itself; the showcase works.
 7. Services + native services checks.
 8. `capture` + visual baselines.
-9. The drawn view, then `NativeRender` and `NativeView` (§8a) → the `escape_hatches` suite passes. Add a native render for the example's `Rating` (`examples/escape_hatches/rating/<os>.rs`) and point its `Render` impl at it.
+9. The drawn view, then `NativeRender` and `NativeView` (§8a) → the `escape_hatches` suite passes. The example has one widget from each platform (rating: AppKit, lock: GTK, pips pager: WinUI). Add the native render for yours (`examples/escape_hatches/<widget>/<os>.rs`, WinUI: `PipsPager`) and name it in the widget's `Render` impl with `native::<W>()`. For the others, prefer an ad hoc render built the way your platform's apps build that widget (`ad_hoc::<W>()`) over the drawn one; only a real platform control counts as native.
 
 When something in the contract doesn't fit your platform, **change the contract rather than working around it**, and update the other backends and this guide. Capture and the clipboard became async for exactly this reason.

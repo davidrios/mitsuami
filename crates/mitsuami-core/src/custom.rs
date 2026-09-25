@@ -5,12 +5,18 @@
 //!   accessibility actions mean.
 //! - [`Drawn`]: the drawn tier. Measure, draw and hit-test in shared code;
 //!   runs everywhere, and stands in for the widget in headless tests.
+//! - The composed tier ([`Renderer::composed`]): built from the built-in
+//!   widgets, for widgets the [`Canvas`] can't draw (text, editing).
 //! - A native render per platform, e.g. `mitsuami_appkit::NativeRender`.
 //! - [`Render`]: says which render each platform uses. Using a widget
 //!   requires it, so a platform with no render doesn't compile.
+//!
+//! A widget unique to one platform is native there. Elsewhere it's built
+//! ad hoc from the platform's widgets, the way that platform's apps build
+//! it ([`Renderer::ad_hoc`]), or drawn, or composed; [`Renderer::is_native`]
+//! says which.
 
 use std::fmt;
-use std::marker::PhantomData;
 use std::rc::Rc;
 
 use mitsuami_reactive::{IntoValue, Value};
@@ -23,7 +29,7 @@ use crate::draw::{Canvas, DisplayList};
 use crate::element::{Element, ElementBuilder};
 use crate::geometry::Size;
 use crate::ui::Ui;
-use crate::view::View;
+use crate::view::{AnyView, View};
 use crate::widget::{NodeId, Prop, WidgetKind};
 
 /// The shared, platform-free definition of a custom widget.
@@ -78,12 +84,52 @@ pub trait Render: CustomWidget {
     fn renderer() -> Renderer<Self>;
 }
 
-/// A widget's renders on the current platform: a native one, a drawn one,
-/// or both (native, with the drawn one for headless tests and `.drawn()`).
-pub struct Renderer<W> {
+/// A widget's renders on the current platform: native, drawn or composed.
+/// The first one present is used: native, then drawn, then composed. The
+/// others stay available (for headless tests, `.drawn()`, `.composed()`).
+pub struct Renderer<W: CustomWidget> {
     native: Option<Opaque>,
+    /// The native render is the platform's own control, not built ad hoc.
+    platform_control: bool,
     drawn: Option<DrawnFns>,
-    _widget: PhantomData<fn() -> W>,
+    composed: Option<ComposeFn<W>>,
+}
+
+/// Builds the composed render from the widget's props and a way to emit
+/// its events.
+type ComposeFn<W> = Rc<dyn Fn(Composed<W>) -> AnyView>;
+
+/// What a composed render gets: the props (reactive), a way to emit the
+/// widget's events, and the accessible label the app gave the widget.
+pub struct Composed<W: CustomWidget> {
+    props: Rc<dyn Fn() -> W::Props>,
+    emit: Rc<dyn Fn(W::Event)>,
+    label: Option<String>,
+}
+
+impl<W: CustomWidget> Clone for Composed<W> {
+    fn clone(&self) -> Self {
+        Composed { props: self.props.clone(), emit: self.emit.clone(), label: self.label.clone() }
+    }
+}
+
+impl<W: CustomWidget> Composed<W> {
+    /// The current props. Reading them in a reactive closure tracks them.
+    pub fn props(&self) -> W::Props {
+        (self.props)()
+    }
+
+    /// Sends an event to the widget's `on_event` handlers. Call it from the
+    /// built-in widgets' handlers (a click, a submit).
+    pub fn emit(&self, event: W::Event) {
+        (self.emit)(event)
+    }
+
+    /// The accessible label the app gave the widget: put it on the control
+    /// that stands for the widget, so it's found the same way.
+    pub fn label(&self) -> Option<String> {
+        self.label.clone()
+    }
 }
 
 impl<W: CustomWidget> Renderer<W> {
@@ -92,13 +138,21 @@ impl<W: CustomWidget> Renderer<W> {
     where
         W: Drawn,
     {
-        Renderer { native: None, drawn: Some(DrawnFns::of::<W>()), _widget: PhantomData }
+        Renderer { native: None, platform_control: false, drawn: Some(DrawnFns::of::<W>()), composed: None }
     }
 
-    /// For backend crates: a native render, in whatever form the backend
-    /// understands. Apps use the backend's constructor instead.
+    /// For backend crates: a native render that is the platform's own
+    /// control, in whatever form the backend understands. Apps use the
+    /// backend's constructor instead.
     pub fn native(render: Opaque) -> Renderer<W> {
-        Renderer { native: Some(render), drawn: None, _widget: PhantomData }
+        Renderer { native: Some(render), platform_control: true, drawn: None, composed: None }
+    }
+
+    /// For backend crates: a render built ad hoc from the platform's widgets,
+    /// where the platform has no such control. It's rendered like a native
+    /// one, but [`is_native`](Renderer::is_native) says no.
+    pub fn ad_hoc(render: Opaque) -> Renderer<W> {
+        Renderer { native: Some(render), platform_control: false, drawn: None, composed: None }
     }
 
     /// Keeps the drawn render too: headless tests lay the widget out with
@@ -109,6 +163,29 @@ impl<W: CustomWidget> Renderer<W> {
     {
         self.drawn = Some(DrawnFns::of::<W>());
         self
+    }
+
+    /// Composes the widget from built-in widgets: the tier for widgets the
+    /// canvas can't draw.
+    pub fn composed<V: View>(compose: impl Fn(Composed<W>) -> V + 'static) -> Renderer<W> {
+        Renderer {
+            native: None,
+            platform_control: false,
+            drawn: None,
+            composed: Some(Rc::new(move |c| AnyView::new(compose(c)))),
+        }
+    }
+
+    /// Keeps a composed render too, for `Custom::composed`.
+    pub fn with_composed<V: View>(mut self, compose: impl Fn(Composed<W>) -> V + 'static) -> Renderer<W> {
+        self.composed = Some(Rc::new(move |c| AnyView::new(compose(c))));
+        self
+    }
+
+    /// Whether the widget is the platform's own control here (rather than
+    /// built ad hoc, drawn or composed as a stand-in).
+    pub fn is_native(&self) -> bool {
+        self.native.is_some() && self.platform_control
     }
 }
 
@@ -231,6 +308,7 @@ pub struct Custom<W: CustomWidget> {
     props: Value<W::Props>,
     renderer: Renderer<W>,
     force_drawn: bool,
+    force_composed: bool,
 }
 
 impl<W: Render> Custom<W> {
@@ -241,6 +319,7 @@ impl<W: Render> Custom<W> {
             props: props.into_value(),
             renderer: W::renderer(),
             force_drawn: false,
+            force_composed: false,
         }
     }
 }
@@ -253,6 +332,13 @@ impl<W: CustomWidget> Custom<W> {
     {
         self.renderer.drawn = Some(DrawnFns::of::<W>());
         self.force_drawn = true;
+        self
+    }
+
+    /// Uses the composed render even where another one exists. Panics at
+    /// build time if the widget has none.
+    pub fn composed(mut self) -> Custom<W> {
+        self.force_composed = true;
         self
     }
 
@@ -277,7 +363,12 @@ impl<W: CustomWidget> ElementBuilder for Custom<W> {
 
 impl<W: CustomWidget> View for Custom<W> {
     fn build(self, ui: &Ui) -> NodeId {
-        let Custom { mut element, props, renderer, force_drawn } = self;
+        let Custom { mut element, props, renderer, force_drawn, force_composed } = self;
+        let composed = force_composed || (!force_drawn && renderer.native.is_none() && renderer.drawn.is_none());
+        if composed {
+            let compose = renderer.composed.unwrap_or_else(|| panic!("{}: no composed render", W::NAME));
+            return build_composed(ui, element, props, compose);
+        }
         let definition = Rc::new(Definition {
             name: W::NAME,
             a11y: |props| W::a11y(props_of::<W>(props)),
@@ -291,6 +382,35 @@ impl<W: CustomWidget> View for Custom<W> {
         });
         element.build(ui)
     }
+}
+
+/// The composed tier: a plain container around what the render builds. The
+/// app's accessible label goes to the render (onto the control that stands
+/// for the widget); styles, test id and handlers stay on the container.
+fn build_composed<W: CustomWidget>(
+    ui: &Ui,
+    mut element: Element,
+    props: Value<W::Props>,
+    compose: ComposeFn<W>,
+) -> NodeId {
+    element.kind = WidgetKind::Container;
+    let label = element.a11y.label.take();
+    let props: Rc<dyn Fn() -> W::Props> = match props {
+        Value::Static(props) => Rc::new(move || props.clone()),
+        Value::Dynamic(props) => props,
+    };
+    // Events go to the container's handlers, the widget's `on_event` ones.
+    let node: Rc<std::cell::Cell<Option<NodeId>>> = Rc::default();
+    let (target, weak) = (node.clone(), ui.downgrade());
+    let emit = Rc::new(move |event: W::Event| {
+        if let (Some(id), Some(ui)) = (target.get(), weak.upgrade()) {
+            ui.events().emit(id, UiEvent::Custom(AnyValue::new(event)));
+        }
+    });
+    element.add_children(compose(Composed { props, emit, label }));
+    let id = element.build(ui);
+    node.set(Some(id));
+    id
 }
 
 /// `Rating::view(props)`: shorthand for `Custom::<Rating>::new(props)`.

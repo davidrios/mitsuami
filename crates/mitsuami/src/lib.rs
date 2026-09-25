@@ -13,14 +13,14 @@
 //! }
 //! ```
 //!
-//! The platform backend is chosen by target OS: AppKit on macOS today, GTK
-//! and WinUI 3 in M2/M3.
+//! The platform backend is chosen by target OS: AppKit on macOS, GTK 4 on
+//! Linux, and WinUI 3 on Windows in M3.
 //!
 //! Escape hatches, for when the shared widgets aren't enough:
 //! - [`platform!`] picks per-platform code (a whole screen, a detail) at
 //!   compile time, while stores and composables stay shared.
 //! - `NativeView` embeds any native view in the shared tree
-//!   ([`appkit::NativeView`] on macOS).
+//!   (`appkit::NativeView` on macOS, `gtk::NativeView` on Linux).
 //! - Custom widgets: one [`CustomWidget`](core::CustomWidget) definition,
 //!   rendered natively per platform or drawn with the
 //!   [`Canvas`](core::Canvas) API.
@@ -38,6 +38,11 @@ pub use mitsuami_widgets as widgets;
 #[cfg(target_os = "macos")]
 pub use mitsuami_appkit as appkit;
 
+/// The GTK 4 backend: native renders, native views, and the `gtk4`
+/// bindings to write them with (`gtk::gtk`).
+#[cfg(target_os = "linux")]
+pub use mitsuami_gtk as gtk;
+
 pub mod prelude {
     pub use crate::{App, platform};
     pub use mitsuami_core::draw::DisplayList;
@@ -47,7 +52,7 @@ pub mod prelude {
     };
     pub use mitsuami_core::task::{TaskHandle, sleep, spawn_blocking, spawn_local};
     pub use mitsuami_core::{
-        A11yAction, A11yProps, Canvas, Color, Custom, CustomView, CustomWidget, Drawn, MeasureRequest, Path,
+        A11yAction, A11yProps, Canvas, Color, Composed, Custom, CustomView, CustomWidget, Drawn, MeasureRequest, Path,
         PlatformMetrics, PointerEvent, PointerKind, Rect, Render, Renderer, Shape,
     };
     pub use mitsuami_core::{

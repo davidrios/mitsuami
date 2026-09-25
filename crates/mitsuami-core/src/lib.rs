@@ -26,7 +26,7 @@ pub use backend::{
     AvailableSpace, Backend, EventSink, Key, MeasureRequest, NativeState, PlatformMetrics, SyntheticInput, TestHooks,
 };
 pub use command::{Command, EventValue, PointerEvent, PointerKind, UiEvent};
-pub use custom::{Custom, CustomProps, CustomView, CustomWidget, Drawn, Render, Renderer};
+pub use custom::{Composed, Custom, CustomProps, CustomView, CustomWidget, Drawn, Render, Renderer};
 pub use draw::{Canvas, Color, DisplayList, Path, Shape};
 pub use element::{Element, ElementBuilder};
 pub use flow::{For, Show};

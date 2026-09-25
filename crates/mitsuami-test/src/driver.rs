@@ -1,5 +1,7 @@
 //! What a test needs from a backend beyond the `Backend` contract.
 
+use std::rc::Rc;
+
 use mitsuami_core::{Command, NodeId, Size, TestHooks, Ui};
 use mitsuami_headless::{HeadlessBackend, HeadlessHandle};
 
@@ -11,7 +13,7 @@ pub enum Mode {
 }
 
 pub(crate) struct Driver {
-    hooks: Box<dyn TestHooks>,
+    hooks: Rc<dyn TestHooks>,
     headless: Option<HeadlessHandle>,
 }
 
@@ -21,11 +23,14 @@ impl Driver {
             Mode::Headless => {
                 let backend = HeadlessBackend::new();
                 let handle = backend.handle();
-                let driver = Driver { hooks: Box::new(handle.clone()), headless: Some(handle) };
+                let driver = Driver { hooks: Rc::new(handle.clone()), headless: Some(handle) };
                 (Ui::new(backend), driver)
             }
             Mode::Native => {
                 let (ui, hooks) = native();
+                let hooks: Rc<dyn TestHooks> = Rc::from(hooks);
+                let idle = hooks.clone();
+                crate::exec::set_idle(Some(Rc::new(move || idle.settle())));
                 (ui, Driver { hooks, headless: None })
             }
         }
@@ -50,6 +55,17 @@ impl Driver {
 
     pub(crate) fn node_count(&self) -> usize {
         self.hooks.node_count()
+    }
+
+    pub(crate) fn settle(&self) {
+        self.hooks.settle();
+    }
+}
+
+impl Drop for Driver {
+    /// The idle hook holds the backend, whose windows live as long as it.
+    fn drop(&mut self) {
+        crate::exec::set_idle(None);
     }
 }
 
@@ -78,15 +94,28 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
     (Ui::new(backend), Box::new(hooks))
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Tests run on a private display unless MITSUAMI_SHOW_WINDOWS=1 (see
+/// `mitsuami_gtk::init_for_tests`). GTK has no private clipboard, but
+/// the private display's clipboard is its own.
+#[cfg(target_os = "linux")]
+fn native() -> (Ui, Box<dyn TestHooks>) {
+    use mitsuami_gtk::{BackendOptions, GtkBackend};
+    let _ = show_windows;
+    mitsuami_gtk::init_for_tests();
+    let backend = GtkBackend::new(BackendOptions { record_commands: true, force_light_appearance: true });
+    let hooks = backend.handle();
+    (Ui::new(backend), Box::new(hooks))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn native() -> (Ui, Box<dyn TestHooks>) {
     let _ = show_windows;
-    panic!("mitsuami-test: no native backend for this platform yet (GTK and WinUI arrive in M2/M3)")
+    panic!("mitsuami-test: no native backend for this platform yet (WinUI arrives in M3)")
 }
 
 /// Whether this platform has a native backend to run `--native` tests on.
 pub(crate) fn native_available() -> bool {
-    cfg!(target_os = "macos")
+    cfg!(any(target_os = "macos", target_os = "linux"))
 }
 
 /// Runs `f` inside an autorelease pool where the platform needs one, so

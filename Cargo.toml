@@ -19,6 +19,7 @@ mitsuami-headless = { path = "crates/mitsuami-headless" }
 mitsuami-test = { path = "crates/mitsuami-test" }
 mitsuami-test-macros = { path = "crates/mitsuami-test-macros" }
 mitsuami-appkit = { path = "crates/mitsuami-appkit" }
+mitsuami-gtk = { path = "crates/mitsuami-gtk" }
 
 slotmap = "1.1"
 taffy = "0.14"
@@ -35,6 +36,10 @@ objc2-app-kit = { version = "0.3", features = ["objc2-uniform-type-identifiers"]
 objc2-uniform-type-identifiers = "0.3"
 objc2-core-foundation = "0.3"
 block2 = "0.6"
+
+# GTK 4.10 is the floor (docs/ARCHITECTURE.md §11).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
+libc = "0.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

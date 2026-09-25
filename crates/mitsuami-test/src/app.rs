@@ -169,7 +169,15 @@ impl TestApp {
     pub(crate) fn settle_now(&self) {
         // The same loop the run loop uses: events a commit produces (a
         // resize, a scroll, focus moving) are handled before we look.
-        self.ui.tick();
+        // Platforms that deliver some of them asynchronously get to catch
+        // up, until nothing new arrives.
+        for _ in 0..16 {
+            self.ui.tick();
+            self.driver.settle();
+            if self.ui.events().is_empty() {
+                break;
+            }
+        }
         self.check_mirror();
     }
 

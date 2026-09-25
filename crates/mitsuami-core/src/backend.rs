@@ -155,6 +155,11 @@ pub trait TestHooks {
     fn take_command_log(&self) -> Vec<Command>;
     /// Live native nodes, as a leak detector.
     fn node_count(&self) -> usize;
+    /// Called after every settle: lets the platform catch up on work it
+    /// does asynchronously (showing windows, allocating, delivering queued
+    /// notifications) without waiting. Platforms that do it all
+    /// synchronously, like AppKit, need nothing here.
+    fn settle(&self) {}
 }
 
 pub trait Backend {
