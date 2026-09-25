@@ -2,8 +2,12 @@
 
 use mitsuami::prelude::*;
 
-fn counter() -> impl View {
+fn counter(log_lines: Signal<Vec<u32>>) -> impl View {
     let count = signal(0);
+    let increment = move || {
+        count.update(|c| *c += 1);
+        log_lines.update(|l| l.push(l.len() as u32 + 1));
+    };
     let confirm_reset = move || {
         spawn_local(async move {
             let answer = alert(
@@ -16,20 +20,21 @@ fn counter() -> impl View {
             .await;
             if answer == 0 {
                 count.set(0);
+                log_lines.set(Vec::new());
             }
         });
     };
     set_menu(
         MenuBar::new().menu(
             Menu::new("Counter")
-                .item(MenuItem::new("Increment", move || count.update(|c| *c += 1)).shortcut(Shortcut::primary('i')))
+                .item(MenuItem::new("Increment", increment).shortcut(Shortcut::primary('i')))
                 .item(MenuItem::new("Reset…", confirm_reset).enabled(move || count.get() != 0)),
         ),
     );
     Column::new().gap(Spacing::Md).children((
         Text::new(move || format!("Count: {}", count.get())).text_style(TextStyle::Title),
         Row::new().gap(Spacing::Sm).children((
-            Button::new("Increment").variant(ButtonVariant::Primary).on_click(move || count.update(|c| *c += 1)),
+            Button::new("Increment").variant(ButtonVariant::Primary).on_click(increment),
             Button::new("Reset…").enabled(move || count.get() != 0).on_click(confirm_reset),
         )),
         Show::new(move || count.get() >= 5, || Text::new("That's a lot of clicks.").text_style(TextStyle::Caption)),
@@ -78,14 +83,20 @@ fn uptime() -> impl View {
     Text::new(move || format!("Open for {}s", seconds.get())).text_style(TextStyle::Caption)
 }
 
-fn log() -> impl View {
-    ScrollView::new().height(120).children((1..=40).map(|i| Text::new(format!("Log line {i}"))).collect::<Vec<_>>())
+fn log(lines: Signal<Vec<u32>>) -> impl View {
+    ScrollView::new().height(120).child(For::new(lines, |i: &u32| *i, |i| Text::new(format!("Log line {i}"))))
 }
 
 fn main() {
     App::new()
         .window("mitsuami showcase", Size::new(520.0, 620.0), || {
-            Column::new().padding(Spacing::Xl).gap(Spacing::Xl).children((counter(), signup(), log(), uptime()))
+            let log_lines = signal((1..=20).collect::<Vec<u32>>());
+            Column::new().padding(Spacing::Xl).gap(Spacing::Xl).children((
+                counter(log_lines),
+                signup(),
+                log(log_lines),
+                uptime(),
+            ))
         })
         .run();
 }
