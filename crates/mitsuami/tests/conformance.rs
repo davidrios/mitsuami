@@ -514,7 +514,7 @@ async fn scrolled_content_renders_at_its_offset(app: TestApp) {
     app.get_by_text("Line 12").scroll_into_view().await;
     app.expect(by_text("Line 12")).to_be_visible().await;
     app.expect(by_text("Line 0")).to_be_hidden().await;
-    app.assert_visual_snapshot("scrolled");
+    app.assert_visual_snapshot("scrolled").await;
 }
 
 // ------------------------------------------------------------ windows
@@ -533,7 +533,7 @@ async fn window_resizes_relayout_the_content(app: TestApp) {
 #[mitsuami_test::test]
 async fn windows_can_be_captured_at_backing_scale(app: TestApp) {
     app.mount(|| Text::new("pixels"));
-    match app.ui().capture(app.window()) {
+    match app.ui().capture(app.window()).await {
         Err(CaptureError::Unsupported) => assert!(app.is_headless(), "only headless may lack capture"),
         Err(e) => panic!("capture failed: {e:?}"),
         Ok(image) => {

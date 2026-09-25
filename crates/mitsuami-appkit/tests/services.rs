@@ -60,8 +60,18 @@ mod checks {
     use objc2::Message;
 
     pub fn clipboard_round_trips(f: &Fixture) {
-        f.ui.set_clipboard_text("mitsuami ✓");
-        assert_eq!(f.ui.clipboard_text().as_deref(), Some("mitsuami ✓"));
+        let written = Rc::new(RefCell::new(None));
+        let read = Rc::new(RefCell::new(None));
+        let (w, r) = (written.clone(), read.clone());
+        let write = f.ui.set_clipboard_text("mitsuami ✓");
+        let ui = f.ui.clone();
+        f.ui.spawn_local(async move {
+            *w.borrow_mut() = Some(write.await);
+            *r.borrow_mut() = ui.clipboard_text().await;
+        });
+        f.ui.tick();
+        assert_eq!(*written.borrow(), Some(Ok(())));
+        assert_eq!(read.borrow().as_deref(), Some("mitsuami ✓"));
     }
 
     pub fn menus_are_installed_and_activate(f: &Fixture) {

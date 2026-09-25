@@ -26,8 +26,8 @@ pub use mitsuami_widgets as widgets;
 pub mod prelude {
     pub use crate::App;
     pub use mitsuami_core::services::{
-        Alert, AlertStyle, FileFilter, Menu, MenuBar, MenuItem, OpenFile, SaveFile, Shortcut, alert, clipboard_text,
-        open_file, save_file, set_clipboard_text, set_menu,
+        Alert, AlertStyle, FileFilter, Menu, MenuBar, MenuItem, OpenFile, SaveFile, ServiceError, Shortcut, alert,
+        clipboard_text, open_file, save_file, set_clipboard_text, set_menu,
     };
     pub use mitsuami_core::task::{TaskHandle, sleep, spawn_blocking, spawn_local};
     pub use mitsuami_core::{

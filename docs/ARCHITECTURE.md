@@ -182,6 +182,8 @@ Raw RGB is allowed on containers and text. It is deliberately not exposed on nat
 
 ## 5. Backend contract
 
+> Implementing a backend? The step-by-step guide is [BACKENDS.md](BACKENDS.md).
+
 The core speaks **only in `NodeId`s and plain data**. Each backend keeps its own `NodeId → native handle` map, so core has no generic parameters and no `dyn Any` handles.
 
 ```rust
@@ -216,18 +218,20 @@ pub trait Backend {
     fn perform(&mut self, id: NodeId, action: &A11yAction) -> Result<(), ActionError>;     // act on the native control
     fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError>; // keys, scroll wheel
     fn native_state(&self, id: NodeId) -> Option<NativeState>; // props, frame, children, focus, scroll offset
-    fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError>; // offscreen screenshot
+    fn capture(&mut self, id: NodeId, reply: Reply<Result<Image, CaptureError>>); // offscreen screenshot
 }
 
 pub trait Services {
-    fn clipboard_text(&mut self) -> Option<String>;
-    fn set_clipboard_text(&mut self, text: &str);
+    fn clipboard_text(&mut self, reply: Reply<Option<String>>);
+    fn set_clipboard_text(&mut self, text: &str, reply: Reply<Result<(), ServiceError>>);
     fn alert(&mut self, parent: Option<NodeId>, alert: &Alert, reply: Reply<usize>);   // never blocks
     fn open_file(&mut self, parent: Option<NodeId>, request: &OpenFile, reply: Reply<Option<Vec<PathBuf>>>);
     fn save_file(&mut self, parent: Option<NodeId>, request: &SaveFile, reply: Reply<Option<PathBuf>>);
     fn set_menu(&mut self, menu: &MenuBarData, activate: Rc<dyn Fn(u32)>); // keeps the platform's standard menus
 }
 ```
+
+Anything a platform might complete later is **reply-based** (async), even when AppKit answers immediately: `capture`, clipboard reads and writes, dialogs. `measure`, `native_state` and `metrics` stay synchronous; see [BACKENDS.md §11](BACKENDS.md#11-sync-and-async-in-the-contract).
 
 A platform's **run loop** drives the `Ui` through three hooks:
 - **`Ui::tick()`** runs ready tasks and due timers, dispatches events and commits, repeating until idle. Call it before the loop sleeps.

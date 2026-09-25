@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use mitsuami_core::NodeId;
-use mitsuami_core::services::{Alert, MenuBarData, MenuEntry, OpenFile, Reply, SaveFile, Services};
+use mitsuami_core::services::{Alert, MenuBarData, MenuEntry, OpenFile, Reply, SaveFile, ServiceError, Services};
 
 /// A request waiting for the test to answer it.
 pub struct Pending<Request, Answer> {
@@ -113,12 +113,14 @@ impl FakeServicesHandle {
 }
 
 impl Services for FakeServices {
-    fn clipboard_text(&mut self) -> Option<String> {
-        self.state.borrow().clipboard.clone()
+    fn clipboard_text(&mut self, reply: Reply<Option<String>>) {
+        let text = self.state.borrow().clipboard.clone();
+        reply(text);
     }
 
-    fn set_clipboard_text(&mut self, text: &str) {
+    fn set_clipboard_text(&mut self, text: &str, reply: Reply<Result<(), ServiceError>>) {
         self.state.borrow_mut().clipboard = Some(text.to_owned());
+        reply(Ok(()));
     }
 
     fn alert(&mut self, parent: Option<NodeId>, alert: &Alert, reply: Reply<usize>) {

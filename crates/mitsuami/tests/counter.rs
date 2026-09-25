@@ -96,7 +96,7 @@ async fn initial_render_snapshots(app: TestApp) {
     app.assert_tree_snapshot("initial");
     app.assert_a11y_snapshot("initial");
     app.assert_wireframe_snapshot("initial");
-    app.assert_visual_snapshot("initial");
+    app.assert_visual_snapshot("initial").await;
 }
 
 mitsuami_test::main!();

@@ -251,6 +251,24 @@ impl AppKitHandle {
     }
 }
 
+impl mitsuami_core::TestHooks for AppKitHandle {
+    fn name(&self) -> &'static str {
+        "appkit"
+    }
+
+    fn resize_window(&self, window: NodeId, size: Size) {
+        AppKitHandle::resize_window(self, window, size);
+    }
+
+    fn take_command_log(&self) -> Vec<Command> {
+        AppKitHandle::take_command_log(self)
+    }
+
+    fn node_count(&self) -> usize {
+        AppKitHandle::node_count(self)
+    }
+}
+
 impl State {
     fn create(&mut self, id: NodeId, kind: WidgetKind, command: &Command) {
         let mtm = self.mtm;
@@ -772,7 +790,14 @@ impl Backend for AppKitBackend {
         Box::new(crate::services::AppKitServices::new(state.mtm, self.handle(), state.options.private_clipboard))
     }
 
-    fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError> {
+    fn capture(&mut self, id: NodeId, reply: mitsuami_core::services::Reply<Result<Image, CaptureError>>) {
+        // Drawing into a bitmap is synchronous on AppKit: answer right away.
+        reply(self.capture_now(id));
+    }
+}
+
+impl AppKitBackend {
+    fn capture_now(&self, id: NodeId) -> Result<Image, CaptureError> {
         let view = {
             let state = self.state.borrow();
             state.nodes.get(&id).ok_or(CaptureError::UnknownNode)?.widget.view().retain()

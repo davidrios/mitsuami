@@ -32,8 +32,17 @@ fn editor() -> impl View {
     Column::new().gap(8).children((
         TextInput::new().a11y_label("Notes").bind(text),
         Row::new().gap(8).children((
-            Button::new("Copy").on_click(move || set_clipboard_text(&text.get_untracked())),
-            Button::new("Paste").on_click(move || text.set(clipboard_text().unwrap_or_default())),
+            Button::new("Copy").on_click(move || {
+                let written = set_clipboard_text(&text.get_untracked());
+                spawn_local(async move {
+                    if let Err(e) = written.await {
+                        status.set(format!("copy failed: {e}"));
+                    }
+                });
+            }),
+            Button::new("Paste").on_click(move || {
+                spawn_local(async move { text.set(clipboard_text().await.unwrap_or_default()) });
+            }),
             Button::new("Discard").on_click(move || {
                 spawn_local(async move {
                     let choice = alert(

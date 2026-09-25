@@ -7,7 +7,8 @@ use std::rc::Rc;
 use block2::RcBlock;
 use mitsuami_core::NodeId;
 use mitsuami_core::services::{
-    Alert, AlertStyle, FileFilter, MenuBarData, MenuData, MenuEntry, OpenFile, Reply, SaveFile, Services, Shortcut,
+    Alert, AlertStyle, FileFilter, MenuBarData, MenuData, MenuEntry, OpenFile, Reply, SaveFile, ServiceError, Services,
+    Shortcut,
 };
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
@@ -112,13 +113,15 @@ impl AppKitServices {
 }
 
 impl Services for AppKitServices {
-    fn clipboard_text(&mut self) -> Option<String> {
-        self.pasteboard.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
+    fn clipboard_text(&mut self, reply: Reply<Option<String>>) {
+        // NSPasteboard reads synchronously: answer right away.
+        reply(self.pasteboard.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string()));
     }
 
-    fn set_clipboard_text(&mut self, text: &str) {
+    fn set_clipboard_text(&mut self, text: &str, reply: Reply<Result<(), ServiceError>>) {
         self.pasteboard.clearContents();
-        self.pasteboard.setString_forType(&ns(text), unsafe { NSPasteboardTypeString });
+        let written = self.pasteboard.setString_forType(&ns(text), unsafe { NSPasteboardTypeString });
+        reply(if written { Ok(()) } else { Err(ServiceError::Failed("the pasteboard refused the text".into())) });
     }
 
     fn alert(&mut self, parent: Option<NodeId>, alert: &Alert, reply: Reply<usize>) {

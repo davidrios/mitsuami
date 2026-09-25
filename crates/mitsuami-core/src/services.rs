@@ -30,6 +30,25 @@ pub enum AlertStyle {
     Critical,
 }
 
+/// Why a service request failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServiceError {
+    /// The platform doesn't offer this service (or not right now).
+    Unavailable,
+    Failed(String),
+}
+
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ServiceError::Unavailable => f.write_str("the service is not available"),
+            ServiceError::Failed(why) => write!(f, "the service failed: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for ServiceError {}
+
 /// A message with buttons. The reply is the index of the chosen button.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Alert {
@@ -188,8 +207,11 @@ pub enum MenuEntry {
 
 /// What a platform provides beyond widgets.
 pub trait Services {
-    fn clipboard_text(&mut self) -> Option<String>;
-    fn set_clipboard_text(&mut self, text: &str);
+    /// Reads the clipboard's text. Async because GTK and WinUI only read the
+    /// clipboard asynchronously; platforms that can may reply right away.
+    fn clipboard_text(&mut self, reply: Reply<Option<String>>);
+    /// Writes the clipboard (it can fail: e.g. another process holds it).
+    fn set_clipboard_text(&mut self, text: &str, reply: Reply<Result<(), ServiceError>>);
 
     /// Shows an alert, attached to `parent` if given (a sheet on macOS) or
     /// to the active window. Must not block: reply when the user answers.
@@ -358,24 +380,25 @@ fn ui() -> Ui {
     crate::task::current_ui()
 }
 
-pub fn clipboard_text() -> Option<String> {
+pub fn clipboard_text() -> impl Future<Output = Option<String>> + use<> {
     ui().clipboard_text()
 }
 
-pub fn set_clipboard_text(text: &str) {
-    ui().set_clipboard_text(text);
+/// Puts text on the clipboard right away; await to learn whether it worked.
+pub fn set_clipboard_text(text: &str) -> impl Future<Output = Result<(), ServiceError>> + use<> {
+    ui().set_clipboard_text(text)
 }
 
 /// Shows an alert on the active window; resolves to the chosen button's index.
-pub fn alert(alert: Alert) -> impl Future<Output = usize> {
+pub fn alert(alert: Alert) -> impl Future<Output = usize> + use<> {
     ui().alert(None, alert)
 }
 
-pub fn open_file(request: OpenFile) -> impl Future<Output = Option<Vec<PathBuf>>> {
+pub fn open_file(request: OpenFile) -> impl Future<Output = Option<Vec<PathBuf>>> + use<> {
     ui().open_file(None, request)
 }
 
-pub fn save_file(request: SaveFile) -> impl Future<Output = Option<PathBuf>> {
+pub fn save_file(request: SaveFile) -> impl Future<Output = Option<PathBuf>> + use<> {
     ui().save_file(None, request)
 }
 

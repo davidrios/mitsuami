@@ -18,7 +18,7 @@ mod view;
 mod widget;
 
 pub use a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
-pub use backend::{Backend, EventSink, Key, NativeState, PlatformMetrics, SyntheticInput};
+pub use backend::{Backend, EventSink, Key, NativeState, PlatformMetrics, SyntheticInput, TestHooks};
 pub use command::{Command, EventValue, UiEvent};
 pub use element::{Element, ElementBuilder};
 pub use flow::{For, Show};

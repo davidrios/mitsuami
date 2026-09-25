@@ -67,6 +67,24 @@ impl TestApp {
         self.settle().await;
     }
 
+    /// Waits for a future the platform completes later (a capture, a
+    /// service reply), keeping the UI turning meanwhile.
+    pub(crate) fn drive<T>(&self, future: impl std::future::Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        let deadline = Instant::now() + wait_timeout();
+        loop {
+            if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+                return value;
+            }
+            if Instant::now() > deadline {
+                panic!("the platform did not answer within {:?}", wait_timeout());
+            }
+            self.settle_now();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// Settles repeatedly until no tasks are left (background work included),
     /// or fails after the wait timeout.
     pub async fn wait_for_tasks(&self) {
@@ -93,17 +111,13 @@ impl TestApp {
     }
 
     pub fn is_headless(&self) -> bool {
-        matches!(self.driver, Driver::Headless(_))
+        self.driver.headless().is_some()
     }
 
     /// The headless backend, for simulating system changes. Tests using it
     /// must be marked `#[mitsuami_test::test(headless)]`.
     pub fn headless(&self) -> &HeadlessHandle {
-        match &self.driver {
-            Driver::Headless(h) => h,
-            #[allow(unreachable_patterns)]
-            _ => panic!("this test uses headless-only APIs; mark it #[mitsuami_test::test(headless)]"),
-        }
+        self.driver.headless().expect("this test uses headless-only APIs; mark it #[mitsuami_test::test(headless)]")
     }
 
     /// Commands the backend applied since the last call.
@@ -233,9 +247,9 @@ impl TestApp {
 
     /// Captures the window and compares it with the PNG baseline in
     /// `tests/visual/<backend>/`. Headless has no pixels, so it skips.
-    #[track_caller]
-    pub fn assert_visual_snapshot(&self, name: &str) {
-        match self.ui.capture(self.window()) {
+    pub async fn assert_visual_snapshot(&self, name: &str) {
+        let capture = self.ui.capture(self.window());
+        match self.drive(capture) {
             Ok(image) => visual::assert(&self.context, self.backend_name(), name, &image),
             Err(mitsuami_core::backend::CaptureError::Unsupported) => {}
             Err(e) => panic!("cannot capture the window: {e:?}"),

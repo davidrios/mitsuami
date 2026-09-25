@@ -197,6 +197,24 @@ impl HeadlessHandle {
     }
 }
 
+impl mitsuami_core::TestHooks for HeadlessHandle {
+    fn name(&self) -> &'static str {
+        "headless"
+    }
+
+    fn resize_window(&self, window: NodeId, size: Size) {
+        HeadlessHandle::resize_window(self, window, size);
+    }
+
+    fn take_command_log(&self) -> Vec<Command> {
+        HeadlessHandle::take_command_log(self)
+    }
+
+    fn node_count(&self) -> usize {
+        HeadlessHandle::node_count(self)
+    }
+}
+
 impl Backend for HeadlessBackend {
     fn init(&mut self, events: EventSink) {
         self.state.borrow_mut().events = Some(events);
@@ -441,8 +459,8 @@ impl Backend for HeadlessBackend {
         })
     }
 
-    fn capture(&mut self, _id: NodeId) -> Result<Image, CaptureError> {
-        Err(CaptureError::Unsupported)
+    fn capture(&mut self, _id: NodeId, reply: mitsuami_core::services::Reply<Result<Image, CaptureError>>) {
+        reply(Err(CaptureError::Unsupported));
     }
 
     fn services(&self) -> Box<dyn mitsuami_core::services::Services> {

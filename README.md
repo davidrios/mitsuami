@@ -6,7 +6,7 @@ flexbox/grid layout.
 
 Status: **M1 done**. The AppKit backend runs real apps on macOS, and the
 same tests pass headlessly and against native AppKit widgets. GTK 4 and
-WinUI 3 come next. The design is in
+WinUI 3 come next; writing one starts with [`docs/BACKENDS.md`](docs/BACKENDS.md). The design is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ```rust

@@ -15,7 +15,7 @@ use crate::a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
 use crate::backend::{AvailableSpace, Backend, EventSink, MeasureRequest, NativeState, PlatformMetrics};
 use crate::command::{Command, EventValue, UiEvent};
 use crate::geometry::{Point, Rect, Size};
-use crate::services::{Alert, MenuBar, OpenFile, SaveFile, Services, reply_future};
+use crate::services::{Alert, MenuBar, OpenFile, SaveFile, ServiceError, Services, reply_future};
 use crate::style::{Style, TextDirection};
 use crate::task::{Clock, Executor, Sleep, TaskHandle};
 use crate::units::ResolveContext;
@@ -206,12 +206,21 @@ impl Ui {
         *self.services.borrow_mut() = services;
     }
 
-    pub fn clipboard_text(&self) -> Option<String> {
-        self.services.borrow_mut().clipboard_text()
+    pub fn clipboard_text(&self) -> impl std::future::Future<Output = Option<String>> + use<> {
+        let (reply, text) = reply_future();
+        self.services.borrow_mut().clipboard_text(reply);
+        text
     }
 
-    pub fn set_clipboard_text(&self, text: &str) {
-        self.services.borrow_mut().set_clipboard_text(text);
+    /// Puts text on the clipboard. The write is issued right away; await
+    /// the result to learn whether it worked.
+    pub fn set_clipboard_text(
+        &self,
+        text: &str,
+    ) -> impl std::future::Future<Output = Result<(), ServiceError>> + use<> {
+        let (reply, done) = reply_future();
+        self.services.borrow_mut().set_clipboard_text(text, reply);
+        done
     }
 
     /// Shows an alert; resolves to the index of the chosen button.
@@ -781,8 +790,14 @@ impl Ui {
         self.inner.borrow().backend.native_state(id)
     }
 
-    pub fn capture(&self, id: NodeId) -> Result<crate::backend::Image, crate::backend::CaptureError> {
-        self.inner.borrow_mut().backend.capture(id)
+    /// An offscreen screenshot of a window or node.
+    pub fn capture(
+        &self,
+        id: NodeId,
+    ) -> impl std::future::Future<Output = Result<crate::backend::Image, crate::backend::CaptureError>> + use<> {
+        let (reply, image) = reply_future();
+        self.inner.borrow_mut().backend.capture(id, reply);
+        image
     }
 
     /// The native tree under `id`, with window-coordinate frames.

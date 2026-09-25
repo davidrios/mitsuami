@@ -79,9 +79,7 @@ fn uptime() -> impl View {
 }
 
 fn log() -> impl View {
-    ScrollView::new()
-        .height(120)
-        .children((1..=40).map(|i| Text::new(format!("Log line {i}"))).collect::<Vec<_>>())
+    ScrollView::new().height(120).children((1..=40).map(|i| Text::new(format!("Log line {i}"))).collect::<Vec<_>>())
 }
 
 fn main() {

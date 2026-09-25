@@ -138,6 +138,21 @@ impl EventSink {
     }
 }
 
+/// What the test harness (`mitsuami-test`) needs from a backend beyond the
+/// [`Backend`] contract. Implemented by each backend's shareable handle.
+pub trait TestHooks {
+    /// Short name used in snapshot and visual baseline paths: `"appkit"`,
+    /// `"gtk"`, `"winui"`.
+    fn name(&self) -> &'static str;
+    /// Resizes a window's content area the way the user would, so the
+    /// platform reports it back as `WindowResized`.
+    fn resize_window(&self, window: NodeId, size: Size);
+    /// Commands applied since the last call (record them when asked to).
+    fn take_command_log(&self) -> Vec<Command>;
+    /// Live native nodes, as a leak detector.
+    fn node_count(&self) -> usize;
+}
+
 pub trait Backend {
     /// Called once when the backend is attached to a [`Ui`](crate::Ui).
     fn init(&mut self, events: EventSink);
@@ -161,8 +176,10 @@ pub trait Backend {
 
     fn native_state(&self, id: NodeId) -> Option<NativeState>;
 
-    /// Offscreen screenshot of a window or node.
-    fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError>;
+    /// Offscreen screenshot of a window or node. Async because some
+    /// platforms render asynchronously (WinUI's `RenderTargetBitmap`);
+    /// reply whenever it's ready, right away if possible.
+    fn capture(&mut self, id: NodeId, reply: crate::services::Reply<Result<Image, CaptureError>>);
 
     /// The platform's clipboard, dialogs and menus. Called once, when the
     /// backend is attached; tests may replace the result.
