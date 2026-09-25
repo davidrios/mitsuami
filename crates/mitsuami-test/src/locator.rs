@@ -1,4 +1,4 @@
-use mitsuami_core::{A11yAction, A11yNode, Key, NativeState, NodeId, Rect, Role, SyntheticInput};
+use mitsuami_core::{A11yAction, A11yNode, Key, NativeState, NodeId, Point, Rect, Role, SyntheticInput};
 
 use crate::app::TestApp;
 use crate::format;
@@ -196,6 +196,27 @@ impl<'a> Locator<'a> {
         if self.is_checked() {
             self.click().await;
         }
+    }
+
+    /// Steps an adjustable control (a slider, a rating) up, like assistive
+    /// technology does.
+    pub async fn increment(&self) {
+        self.act(A11yAction::Increment).await;
+    }
+
+    pub async fn decrement(&self) {
+        self.act(A11yAction::Decrement).await;
+    }
+
+    /// Clicks at a point in the node's own coordinates. Drawn custom
+    /// widgets support it; native controls are driven by `click`.
+    pub async fn click_at(&self, x: f32, y: f32) {
+        self.app.settle().await;
+        let node = self.node();
+        if let Err(e) = self.app.ui().synthesize(node.id, &SyntheticInput::Click(Point::new(x, y))) {
+            self.fail(&format!("cannot click {} at {x},{y}: {e}", self.query));
+        }
+        self.app.settle().await;
     }
 }
 

@@ -1,6 +1,7 @@
 //! The data flowing between the core and a backend.
 
 use crate::a11y::A11yProps;
+use crate::any_value::AnyValue;
 use crate::geometry::{Point, Rect, Size};
 use crate::widget::{NodeId, Prop, WidgetKind};
 
@@ -93,4 +94,21 @@ pub enum UiEvent {
     MetricsChanged,
     /// A `ScrollView`'s scroll offset changed (by the user or by `ScrollTo`).
     Scrolled(Point),
+    /// A pointer event on a drawn custom widget, in its coordinates.
+    Pointer(PointerEvent),
+    /// An event of a custom widget or native view, of its own type.
+    Custom(AnyValue),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerKind {
+    Down,
+    Up,
+}
+
+/// A primary-button pointer event. Position in the node's coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointerEvent {
+    pub kind: PointerKind,
+    pub position: Point,
 }

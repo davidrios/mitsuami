@@ -74,6 +74,10 @@ pub enum SyntheticInput {
         dx: f32,
         dy: f32,
     },
+    /// A primary-button click (down, then up) at this point, in the node's
+    /// coordinates. Backends support it on drawn custom widgets, whose
+    /// pointer handling is ours.
+    Click(Point),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

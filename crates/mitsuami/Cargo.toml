@@ -47,5 +47,9 @@ harness = false
 name = "services"
 harness = false
 
+[[test]]
+name = "escape_hatches"
+harness = false
+
 [lints]
 workspace = true

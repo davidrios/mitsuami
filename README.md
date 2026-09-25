@@ -4,9 +4,11 @@ Native, declarative, cross-platform UI for Rust: AppKit on macOS, WinUI 3 on
 Windows, GTK 4 on Linux, driven by one Vue-inspired layer with CSS-style
 flexbox/grid layout.
 
-Status: **M1 done**. The AppKit backend runs real apps on macOS, and the
-same tests pass headlessly and against native AppKit widgets. GTK 4 and
-WinUI 3 come next; writing one starts with [`docs/BACKENDS.md`](docs/BACKENDS.md). The design is in
+Status: **M1 and M4 done**. The AppKit backend runs real apps on macOS, and the
+same tests pass headlessly and against native AppKit widgets. The escape
+hatches work on AppKit: `platform!` for per-platform screens, `NativeView`
+for any `NSView`, and custom widgets with native, drawn or composed renders.
+GTK 4 and WinUI 3 come next; writing one starts with [`docs/BACKENDS.md`](docs/BACKENDS.md). The design is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ```rust
@@ -51,7 +53,8 @@ Tests control time (`app.advance(..)` moves the clock that `sleep` uses)
 and answer dialogs through scripted services (`app.services()`), so they
 never open real dialogs or touch your clipboard.
 
-Try the example app with `cargo run -p mitsuami --example showcase`.
+Try the example apps with `cargo run -p mitsuami --example showcase` and
+`cargo run -p mitsuami --example escape_hatches`.
 
 UI test targets use `harness = false` and `mitsuami_test::main!()`, because
 native UI has to own the main thread. See `crates/mitsuami/tests/` for

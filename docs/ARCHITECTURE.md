@@ -189,7 +189,7 @@ The core speaks **only in `NodeId`s and plain data**. Each backend keeps its own
 ```rust
 // As implemented (crates/mitsuami-core/src/{command,backend,services}.rs).
 pub enum Command {
-    Create        { id: NodeId, kind: WidgetKind, props: Vec<Prop> }, // views start with a zero frame
+    Create        { id: NodeId, kind: WidgetKind, props: Vec<Prop> }, // zero frame; initial props, reactive ones too
     SetProp       { id: NodeId, prop: Prop },
     Insert        { parent: NodeId, child: NodeId, index: usize },  // a ScrollView has exactly one child
     Remove        { parent: NodeId, child: NodeId },
@@ -205,6 +205,8 @@ pub enum Command {
 pub enum UiEvent {   // backend → core, through the EventSink
     Click, Changed(EventValue), Submit, FocusIn, FocusOut, Scrolled(Point),
     WindowResized(Size), WindowCloseRequested, MetricsChanged,
+    Pointer(PointerEvent),  // drawn custom widgets (§6.3)
+    Custom(AnyValue),       // custom widgets and native views, their own event types
 }
 
 pub trait Backend {
@@ -255,45 +257,60 @@ Properties of this contract:
 
 ## 6. Escape hatches
 
+> Working example: `crates/mitsuami/examples/escape_hatches/`, tested by `crates/mitsuami/tests/escape_hatches.rs`.
+
 ### 6.1 Platform-specific screens with shared behaviour
 
 Logic lives in **composables** (Vue's `useXxx`) or **stores** (Pinia-like). Views are thin, so writing two views costs little.
 
 ```rust
-// shared, platform-agnostic
-pub fn use_preferences(store: &Settings) -> PreferencesModel { /* signals + actions */ }
+// shared, platform-agnostic: signals and actions, provided to the screens
+#[derive(Clone, Copy)]
+pub struct Review { pub stars: Signal<u8>, pub comment: Signal<String>, /* … */ }
+pub fn use_review() -> Review { inject::<Review>().expect("provide a Review") }
 
-#[component]
-pub fn Preferences() -> impl View {
-    let m = use_preferences(&use_store::<Settings>());
+pub fn review_screen() -> impl View {
     platform! {
-        macos => mac::PreferencesWindow(m),   // toolbar-tabbed prefs window, macOS style
-        _     => PreferencesPage(m),          // shared Windows/Linux version
+        macos => macos::review_screen(),   // trailing labels, NSStepper, button at the trailing edge
+        _     => shared::review_screen(),  // the Windows/Linux version
     }
 }
 ```
 
-- `platform!` is compile-time (`cfg`), so code for other platforms is never compiled into the binary.
-- Arms can be `macos`, `windows`, `linux`, or groups like `desktop_unix`, plus `_`.
-- Per-platform view files follow a convention: `preferences.rs`, `preferences.macos.rs`, and so on.
+- `platform!` is compile-time (`cfg`), so code for other platforms is never compiled into the binary. Arms may have different types.
+- Arms are `macos`, `windows`, `linux`, several joined with `|`, and a final `_`. The first matching arm wins.
+- Without a `_` arm, building for a platform no arm names fails, so a missing screen can't ship by accident.
+- Per-platform view files follow a convention: `review/mod.rs`, `review/macos.rs`, `review/shared.rs`. The shared screen is compiled everywhere so it can be tested everywhere.
+- Capability predicates on arms (`macos if has(…)`) wait for capabilities (§11).
 
 ### 6.2 Raw native view inside the shared tree
 
 ```rust
-#[cfg(target_os = "macos")]
-NativeView::appkit(|cx: &mut AppKitCx| -> Retained<NSView> { /* build anything */ })
-    .measure(|view, constraints| /* optional */)
-    .a11y(A11yProps::group("Map"))
+NativeView::appkit(|cx: &mut AppKitCx| {
+    let stepper = NSStepper::new(cx.mtm());
+    let emitter = cx.emitter();
+    cx.on_action(&*stepper, move |s| emitter.emit(s.doubleValue().round() as u8));
+    stepper
+})
+.update(review.stars, |stepper, stars| stepper.setDoubleValue(*stars as f64))  // re-applied when stars changes
+.on_event(move |stars: &u8| review.rate(*stars))
+.measure(|view, request| /* optional; default intrinsicContentSize */)
+.a11y_label("Stars")
 ```
 
-It takes part in layout, focus and a11y like any other node. Core sees `WidgetKind::Native`.
+- It takes part in layout, a11y and events like any other node. Core sees `WidgetKind::Native`.
+- The factory and the current value of every `update` travel as one `Prop::Native` payload (an `Opaque`: compared by identity, printed as its label). When any value changes, the payload is sent again and every update re-applied.
+- Native callbacks never touch signals directly; they `emit` events that are queued and dispatched on the next turn, like any native event.
+- Accessibility actions (`Activate`, `Increment`, `Decrement`) go to the view's accessibility element, as VoiceOver's would.
+- Headless tests show a native view as an empty box sized by its styles.
+- `mitsuami::appkit` re-exports `objc2`, `objc2_app_kit` and `objc2_foundation` at the backend's versions.
 
 ### 6.3 Custom widgets: generic logic plus one render per platform
 
 Custom widgets come in three tiers. Pick the lowest that works:
 
 1. **Composition:** a component built from existing widgets. It runs everywhere.
-2. **Drawn:** a generic `Canvas` render using a small 2D API over CoreGraphics, Direct2D/Win2D and Cairo/GSK, with platform theme tokens. It runs everywhere and follows platform colours and metrics, but isn't truly native.
+2. **Drawn:** a shared `Drawn` implementation using a small 2D API (`Canvas`: fill and stroke rects, rounded rects, ellipses and paths) with semantic colors (`Color::Accent`, `Color::Label`, …). It runs everywhere and follows dark mode and the accent color, but isn't truly native.
 3. **Native per platform:** one shared definition plus one render per platform.
 
 ```rust
@@ -301,31 +318,49 @@ Custom widgets come in three tiers. Pick the lowest that works:
 pub struct Rating;
 impl CustomWidget for Rating {
     const NAME: &'static str = "Rating";
-    type Props = RatingProps;                 // { value: f32, max: u8, editable: bool }
-    type Event = RatingEvent;                 // Changed(f32)
-    fn a11y(p: &Self::Props) -> A11yProps {   // semantics are shared
-        A11yProps::slider("Rating").value(p.value).range(0.0, p.max as f32)
+    type Props = RatingProps;                 // { value: u8, max: u8, editable: bool }
+    type Event = RatingEvent;                 // Changed(u8)
+    fn a11y(p: &RatingProps) -> A11yProps {   // semantics are shared
+        A11yProps::new(Role::Slider).label("Rating").value(format!("{} of {}", p.value, p.max))
     }
-    fn fallback() -> Option<Fallback<Self>> { Some(Fallback::Drawn(draw_stars)) }  // optional tier 1/2
+    fn action(p: &RatingProps, action: &A11yAction) -> Option<RatingEvent> { /* Increment → Changed(value + 1) … */ }
 }
 
-// One impl per platform, each under cfg. They live in the same crate, e.g. rating/macos.rs.
+// Tier 2, shared too.
+impl Drawn for Rating {
+    fn measure(p: &RatingProps, request: &MeasureRequest, metrics: &PlatformMetrics) -> Size;
+    fn draw(p: &RatingProps, canvas: &mut Canvas);
+    fn pointer(p: &RatingProps, size: Size, event: &PointerEvent) -> Option<RatingEvent>;
+}
+
+// Tier 3: one impl per platform, each under cfg, e.g. rating/macos.rs.
 #[cfg(target_os = "macos")]
 impl NativeRender for Rating {                 // trait defined by mitsuami-appkit
     type View = NSLevelIndicator;
-    fn create(p: &RatingProps, cx: &mut AppKitCx<RatingEvent>) -> Retained<Self::View>;
-    fn update(v: &Self::View, old: &RatingProps, new: &RatingProps);
-    fn measure(v: &Self::View, c: Constraints) -> Option<Size> { None } // None = use native
+    fn create(p: &RatingProps, cx: &mut AppKitCx) -> Retained<NSLevelIndicator>;
+    fn update(v: &NSLevelIndicator, old: &RatingProps, new: &RatingProps);
+    fn measure(v: &NSLevelIndicator, p: &RatingProps, request: &MeasureRequest) -> Option<Size> { None } // None = intrinsicContentSize
+    fn read(v: &NSLevelIndicator, p: &RatingProps) -> RatingProps;  // read back, for the mirror check
 }
-#[cfg(target_os = "windows")] impl NativeRender for Rating { /* RatingControl */ }
-#[cfg(target_os = "linux")]   impl NativeRender for Rating { /* gtk::Box + toggles, or Drawn */ }
+
+// Which render each platform uses.
+impl Render for Rating {
+    fn renderer() -> Renderer<Self> {
+        platform! {
+            macos => mitsuami::appkit::native::<Self>().with_drawn(),
+            _ => Renderer::drawn(),
+        }
+    }
+}
 ```
 
-- A usage site is `Rating::view(props).on(RatingEvent::Changed, …)`. It is the same on every platform.
-- **Compile-time coverage:** if a platform has neither a `NativeRender` impl nor a fallback, building for that platform fails. You can't ship a missing render by accident.
-- The backend registers renders by `NAME`. Commands carry `WidgetKind::Custom(NAME)` and the props as a boxed `dyn Any`. Custom props don't need to be serializable, though they can opt in.
-
----
+- A usage site is `Rating::view(move || RatingProps::new(stars.get())).on_event(…)`, the same on every platform. `.drawn()` picks the drawn render where a native one exists.
+- **Compile-time coverage:** using a widget requires `Render`, and `Render` has to name a render that exists on the platform being built: a `NativeRender` impl or a `Drawn` one. A missing render doesn't build.
+- **Transport:** commands carry `WidgetKind::Custom(NAME)` and `Prop::Custom(CustomProps)`: the props as an `AnyValue` (type-erased, but still compared and printed with their own `PartialEq` and `Debug`) plus the widget's definition (semantics, action mapping, renders). Events come back as `UiEvent::Custom(AnyValue)`. Props don't need to be serializable. The native render travels with the props, so backends keep no registry.
+- **Semantics** come from `CustomWidget::a11y`; app overrides (`.a11y_label(…)`) win. Accessibility actions go to the native render first; if it doesn't handle one, the core emits the event `CustomWidget::action` maps it to. Drawn and native renders behave the same for assistive technology and tests.
+- **The drawn tier runs in the core.** The core measures drawn widgets itself, draws them after layout (on new props, a new size or new metrics) and sends the result as `Prop::Drawing(DisplayList)` with the frames. Backends only rasterize display lists and report `UiEvent::Pointer`, which the core turns into widget events with `Drawn::pointer`. Headless wireframes draw them too.
+- **Headless** lays out natively rendered widgets with their drawn render (hence `.with_drawn()` above), or as empty boxes without one.
+- **Controlled:** a render emits an event when the user changes the view; the app answers with new props, and `update` shows them. If the app ignores the event, the view shows something the core doesn't know about, and the mirror check (via `read`) reports it.
 
 ## 7. Accessibility and i18n affordances (designed in now, implemented later)
 
@@ -607,9 +642,11 @@ This is exposed as `Backend::capture`.
 | **M1 — AppKit** ✅ | Window, View hosts, Text, Button, TextInput, Checkbox, Switch; run-loop flush; measure; resize → relayout | The M0 tests pass with `--native` on macOS; conformance suite v1 passes; `Backend::capture` works and a first visual baseline exists |
 | **M2 — GTK 4** | The same widget set (developed and tested on Linux, e.g. a VM or CI) | The same tests and conformance suite pass with `--native` on Linux |
 | **M3 — WinUI 3** | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
-| **M4 — Escape hatches** | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn fallback) | Demo has a mac-specific screen sharing a store, and a custom widget with three renders |
+| **M4 — Escape hatches** ✅ (AppKit) | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn fallback) | Demo has a mac-specific screen sharing a store, and a custom widget with three renders |
 | **M5 — Ergonomics** | `#[component]`, `view!`, stores, resources | Demo rewritten with macros |
 | **M6 — Visual review** | Stories, the variant matrix, perceptual diff, `cargo mitsuami visual review` HTML report, CI on three OSes | A PR that changes a widget shows up as a reviewable visual diff on all three platforms |
+
+M4's custom widget has a native render on macOS and uses the drawn render on Windows and Linux. The GTK and WinUI counterparts of `NativeRender` and `NativeView::appkit` arrive with those backends (M2/M3); BACKENDS.md §8a says what they involve.
 
 Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, dialogs beyond an alert, the a11y implementation (the model exists), animations, and a devtools inspector.
 
@@ -646,6 +683,14 @@ Things the AppKit backend taught us, some of them now part of the contract:
 - **Services:** tests always use the scripted fake, even natively, so they never show real dialogs or touch the real clipboard. The real AppKit services have their own checks (`mitsuami-appkit/tests/services.rs`): a private pasteboard, the real `NSMenu` bar, an alert sheet answered by clicking, and a cancelled open panel.
 - **`cargo test -- --native` also reaches libtest harnesses**, which reject the flag, so `MITSUAMI_NATIVE=1` is the workspace-wide switch.
 - **Known gap: min-content text measurement.** Min-content currently falls back to max-content, so text never shrinks below one line inside flex rows. It still wraps under a definite width (columns, fixed widths).
+
+### M4 (escape hatches)
+
+- **Widgets are created with their initial props, reactive ones included.** Reactive props used to arrive as `SetProp` right after `Create`. That's harmless for built-in widgets, but a custom widget or native view can't be created without its props. The core now merges props set before a node's `Create` has gone out into that `Create`. Headless rejects a custom widget or native view created without its prop; the AppKit run caught the gap first.
+- **Native views' payloads are one prop.** With a factory prop plus update props sharing a key, the first update replaced the factory in `Create`. Now one reactive payload holds the factory and the current value of every update.
+- **Act on the accessibility element, not the view.** An `NSStepper` isn't an accessibility element; its only accessibility child (the cell) is, and only that one increments and sends the action. The backend walks down to it, as VoiceOver does.
+- **Synthesized clicks** (`SyntheticInput::Click`) are for drawn widgets only. Native controls track the mouse in a loop of their own, waiting for real events; tests drive them with accessibility actions.
+- The drawn render sizes its stars from the body font, so it sits close to the native rating control. Headless wireframes draw display lists, so drawn widgets show up in reviews without pixels.
 
 ## 17. Open questions
 

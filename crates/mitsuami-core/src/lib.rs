@@ -4,8 +4,11 @@
 //! See `docs/ARCHITECTURE.md` for the design.
 
 pub mod a11y;
+mod any_value;
 pub mod backend;
 pub mod command;
+mod custom;
+pub mod draw;
 mod element;
 mod flow;
 pub mod geometry;
@@ -18,8 +21,13 @@ mod view;
 mod widget;
 
 pub use a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
-pub use backend::{Backend, EventSink, Key, NativeState, PlatformMetrics, SyntheticInput, TestHooks};
-pub use command::{Command, EventValue, UiEvent};
+pub use any_value::{AnyValue, Opaque};
+pub use backend::{
+    AvailableSpace, Backend, EventSink, Key, MeasureRequest, NativeState, PlatformMetrics, SyntheticInput, TestHooks,
+};
+pub use command::{Command, EventValue, PointerEvent, PointerKind, UiEvent};
+pub use custom::{Custom, CustomProps, CustomView, CustomWidget, Drawn, Render, Renderer};
+pub use draw::{Canvas, Color, DisplayList, Path, Shape};
 pub use element::{Element, ElementBuilder};
 pub use flow::{For, Show};
 pub use geometry::{Point, Rect, Size};

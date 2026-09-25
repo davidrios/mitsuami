@@ -2,8 +2,9 @@
 
 use std::fmt::Write;
 
+use mitsuami_core::draw::{DrawOp, PathElement};
 use mitsuami_core::geometry::Num;
-use mitsuami_core::{A11yNode, Command, NodeInfo, Prop, WidgetKind};
+use mitsuami_core::{A11yNode, Color, Command, DisplayList, NodeInfo, Point, Prop, Shape, WidgetKind};
 
 fn describe_props(props: &[Prop]) -> String {
     let mut quoted = None;
@@ -20,6 +21,9 @@ fn describe_props(props: &[Prop]) -> String {
             Prop::TextStyle(s) => extra.push(format!("style={s:?}")),
             Prop::Variant(v) => extra.push(format!("variant={v:?}")),
             Prop::ScrollAxes(a) => extra.push(format!("scroll={a:?}")),
+            Prop::Custom(c) => extra.push(format!("{c:?}")),
+            Prop::Drawing(d) => extra.push(format!("drawing={}ops", d.ops().len())),
+            Prop::Native(n) => extra.push(format!("{n:?}")),
         }
     }
     let mut out = String::new();
@@ -115,6 +119,79 @@ pub(crate) fn commands(log: &[Command]) -> String {
     out
 }
 
+/// A drawn widget's display list, as SVG shapes. Semantic colors get
+/// fixed stand-ins, so wireframes don't depend on the appearance.
+fn draw(drawing: &DisplayList, origin: Point, out: &mut String) {
+    fn color(color: Color) -> String {
+        match color {
+            Color::Label => "#222222".into(),
+            Color::SecondaryLabel => "#777777".into(),
+            Color::Accent => "#2f6fdf".into(),
+            Color::Separator => "#cccccc".into(),
+            Color::ControlBackground | Color::WindowBackground => "#f4f4f4".into(),
+            Color::Rgba(r, g, b, a) => format!("rgba({r},{g},{b},{})", Num(a as f32 / 255.0)),
+        }
+    }
+    fn shape(shape: &Shape, paint: &str) -> String {
+        match shape {
+            Shape::Rect(r) => format!(
+                r#"<rect x="{}" y="{}" width="{}" height="{}" {paint}/>"#,
+                Num(r.x()),
+                Num(r.y()),
+                Num(r.width()),
+                Num(r.height())
+            ),
+            Shape::RoundedRect(r, radius) => format!(
+                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" {paint}/>"#,
+                Num(r.x()),
+                Num(r.y()),
+                Num(r.width()),
+                Num(r.height()),
+                Num(*radius)
+            ),
+            Shape::Ellipse(r) => format!(
+                r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" {paint}/>"#,
+                Num(r.x() + r.width() / 2.0),
+                Num(r.y() + r.height() / 2.0),
+                Num(r.width() / 2.0),
+                Num(r.height() / 2.0)
+            ),
+            Shape::Path(path) => {
+                let mut d = String::new();
+                for element in path.elements() {
+                    let _ = match element {
+                        PathElement::MoveTo(p) => write!(d, "M{} {} ", Num(p.x), Num(p.y)),
+                        PathElement::LineTo(p) => write!(d, "L{} {} ", Num(p.x), Num(p.y)),
+                        PathElement::CurveTo { c1, c2, to } => write!(
+                            d,
+                            "C{} {} {} {} {} {} ",
+                            Num(c1.x),
+                            Num(c1.y),
+                            Num(c2.x),
+                            Num(c2.y),
+                            Num(to.x),
+                            Num(to.y)
+                        ),
+                        PathElement::Close => write!(d, "Z "),
+                    };
+                }
+                format!(r#"<path d="{}" {paint}/>"#, d.trim_end())
+            }
+        }
+    }
+    let _ = writeln!(out, r#"  <g transform="translate({} {})">"#, Num(origin.x), Num(origin.y));
+    for op in drawing.ops() {
+        let element = match op {
+            DrawOp::Fill { shape: s, color: c } => shape(s, &format!(r#"fill="{}""#, color(*c))),
+            DrawOp::Stroke { shape: s, color: c, width } => {
+                shape(s, &format!(r#"fill="none" stroke="{}" stroke-width="{}""#, color(*c), Num(*width)))
+            }
+        };
+        let _ = writeln!(out, "    {element}");
+    }
+    let _ = writeln!(out, "  </g>");
+}
+
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -157,6 +234,9 @@ pub(crate) fn wireframe(root: &NodeInfo) -> String {
                 color(node.kind),
                 escape(&label)
             );
+        }
+        if let Some(drawing) = mitsuami_core::find_prop!(node.props, Drawing) {
+            draw(&drawing, f.origin, out);
         }
         for child in &node.children {
             walk(child, out);

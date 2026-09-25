@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+use crate::any_value::Opaque;
+use crate::custom::CustomProps;
+use crate::draw::DisplayList;
+
 /// Stable identity of a node for the lifetime of a [`Ui`](crate::Ui).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub(crate) u32);
@@ -37,12 +41,14 @@ pub enum WidgetKind {
     TextInput,
     Checkbox,
     Switch,
-    /// A custom widget registered by name (see `CustomWidget`, M4).
     /// A native scroll container. It has exactly one native child, the
     /// content, which the core lays out and may be larger than the viewport.
     ScrollView,
+    /// A custom widget (see [`CustomWidget`](crate::CustomWidget)), named
+    /// after it. Its props travel as [`Prop::Custom`].
     Custom(&'static str),
-    /// A raw native view supplied by app code (see `NativeView`, M4).
+    /// A raw native view supplied by app code. Its factory and updates
+    /// travel as [`Prop::Native`].
     Native,
 }
 
@@ -133,6 +139,14 @@ pub enum Prop {
     Variant(ButtonVariant),
     /// Which axes a `ScrollView` scrolls.
     ScrollAxes(ScrollAxes),
+    /// A custom widget's props, with its renders.
+    Custom(CustomProps),
+    /// What a drawn custom widget shows. Computed by the core after layout,
+    /// so it arrives with the frames.
+    Drawing(DisplayList),
+    /// A `Native` node's factory (on create), then its updates: payloads in
+    /// the backend's own form.
+    Native(Opaque),
 }
 
 impl Prop {
@@ -143,7 +157,16 @@ impl Prop {
 
     /// Whether changing this prop can change the widget's intrinsic size.
     pub fn affects_measure(&self) -> bool {
-        matches!(self, Prop::Text(_) | Prop::Label(_) | Prop::Placeholder(_) | Prop::TextStyle(_) | Prop::Variant(_))
+        matches!(
+            self,
+            Prop::Text(_)
+                | Prop::Label(_)
+                | Prop::Placeholder(_)
+                | Prop::TextStyle(_)
+                | Prop::Variant(_)
+                | Prop::Custom(_)
+                | Prop::Native(_)
+        )
     }
 }
 

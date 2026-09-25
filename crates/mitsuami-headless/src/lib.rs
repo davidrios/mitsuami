@@ -19,7 +19,10 @@ use mitsuami_core::backend::{
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::units::SpacingScale;
-use mitsuami_core::{Command, EventValue, NodeId, Point, Prop, Rect, Size, TextStyle, UiEvent, WidgetKind, find_prop};
+use mitsuami_core::{
+    Command, EventValue, NodeId, Point, PointerEvent, PointerKind, Prop, Rect, Size, TextStyle, UiEvent, WidgetKind,
+    find_prop,
+};
 
 /// Fixed metrics: 16px body text, 4/8/12/16/24 spacing, scale factor 1.
 pub fn metrics() -> PlatformMetrics {
@@ -236,6 +239,12 @@ impl Backend for HeadlessBackend {
                     if *kind == WidgetKind::Fragment {
                         violation(command, "fragments are core-only");
                     }
+                    if matches!(kind, WidgetKind::Custom(_)) && find_prop!(props, Custom).is_none() {
+                        violation(command, "custom widgets are created with their Prop::Custom");
+                    }
+                    if *kind == WidgetKind::Native && find_prop!(props, Native).is_none() {
+                        violation(command, "native views are created with their Prop::Native");
+                    }
                     state.nodes.insert(
                         *id,
                         HeadlessNode {
@@ -350,6 +359,11 @@ impl Backend for HeadlessBackend {
                 Size::new(16.0 + 6.0 + text.width, line.max(16.0))
             }
             WidgetKind::Switch => Size::new(40.0, 24.0),
+            // Native renders are stood in for by the drawn one, if any.
+            // Native views have no stand-in: size them with styles.
+            WidgetKind::Custom(_) => find_prop!(node.props, Custom)
+                .and_then(|c| c.measure_drawn(&request, &state.metrics))
+                .unwrap_or(Size::ZERO),
             _ => Size::ZERO,
         };
         Size::new(request.known_width.unwrap_or(natural.width), request.known_height.unwrap_or(natural.height))
@@ -396,6 +410,17 @@ impl Backend for HeadlessBackend {
         let kind = node.kind;
         let key = match input {
             SyntheticInput::Key(key) => key,
+            SyntheticInput::Click(position) => {
+                // Only drawn widgets handle pointers themselves.
+                let drawn = find_prop!(node.props, Custom).is_some_and(|c| c.is_drawn());
+                if !drawn {
+                    return Err(ActionError::Unsupported);
+                }
+                for kind in [PointerKind::Down, PointerKind::Up] {
+                    state.emit(id, UiEvent::Pointer(PointerEvent { kind, position: *position }));
+                }
+                return Ok(());
+            }
             SyntheticInput::Scroll { dx, dy } => {
                 if kind != WidgetKind::ScrollView {
                     return Err(ActionError::Unsupported);

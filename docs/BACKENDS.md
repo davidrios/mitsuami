@@ -41,7 +41,8 @@ Keep a shareable handle (`Rc<RefCell<State>>` inside the backend, with a cloneab
 `Backend::apply(&mut self, batch: &[Command])` receives batches. **Order within a batch matters**, and the core guarantees:
 
 - A node is created before it is inserted, and a subtree's root is removed before it is destroyed.
-- Frames arrive in a second `apply` call per commit, after structure and props, because layout measures widgets that must already exist.
+- Frames arrive in a second `apply` call per commit, after structure and props, because layout measures widgets that must already exist. Drawn widgets' `SetProp(Drawing)` comes in that second call too: drawing needs the size.
+- `Create` carries the widget's initial props, reactive ones included.
 
 Validate as you go. Panic on protocol violations such as an unknown node, a double insert, or a second child in a ScrollView. The headless backend does this too; it's how contract bugs surface.
 
@@ -71,7 +72,9 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 | `Checkbox` | `NSButton` checkbox | `gtk::CheckButton` | `CheckBox` |
 | `Switch` | `NSSwitch` | `gtk::Switch` | `ToggleSwitch` |
 | `ScrollView` | `NSScrollView` | `gtk::ScrolledWindow` | `ScrollViewer` |
-| `Custom`, `Native` | a plain host (M4) | a plain host | a plain host |
+| `Custom` (native render) | the render's view (`NativeRender`) | the render's widget | the render's element |
+| `Custom` (drawn) | `DrawnView`: flipped `NSView` that rasterizes the display list | a `gtk::DrawingArea` / snapshot with Cairo or GSK | a `Canvas` with Win2D, or `Microsoft.UI.Composition` shapes |
+| `Native` | the app's `NSView` (`NativeView::appkit`) | the app's `gtk::Widget` | the app's `FrameworkElement` |
 
 ### Props
 
@@ -87,6 +90,9 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 | `TextStyle` | Text (and controls) | Map to the platform type ramp: GTK style classes (`title-1`, `heading`, `caption`, `monospace`); WinUI text styles (`TitleTextBlockStyle`, …). |
 | `Variant` | Button | Primary = the default / suggested action (GTK `suggested-action`, WinUI `AccentButtonStyle`); Destructive (GTK `destructive-action`); Plain = borderless (GTK `flat`). |
 | `ScrollAxes` | ScrollView | Which scrollbars / scroll directions exist. |
+| `Custom` | Custom | The widget's props and definition. Native render: call its `update` when they differ. Drawn: just keep them for `native_state`. See §8a. |
+| `Drawing` | Custom (drawn) | The display list to rasterize. Redraw. |
+| `Native` | Native | Your own payload type: on `Create`, the factory; later, re-apply its updates. |
 
 ## 4. Events
 
@@ -103,6 +109,8 @@ Native callbacks **only** call `events.emit(id, event)` on the `EventSink` given
 | `WindowResized(size)` | the window's content area changes size (report the content size, excluding any menu bar you placed in the window) | |
 | `WindowCloseRequested` | the user asks to close a window. **Don't close it**: the app decides, and the core sends `Destroy`. | |
 | `MetricsChanged` | text scale, scale factor, theme or contrast changes | |
+| `Pointer(event)` | primary button down / up on a **drawn** custom widget, in its coordinates | |
+| `Custom(value)` | a native render or native view emits (through your `Emitter`) | |
 
 Focus tracking needs one global observer, not per-widget guesses. Examples: AppKit uses KVO on `NSWindow.firstResponder`, GTK can use `notify::focus-widget` on the window, and WinUI can use `FocusManager.GotFocus`/`LostFocus`. Map the focused native object to the nearest known node by walking up its parents. Composite widgets (a text field's inner editor, a scrolled window's viewport) put focus on children you didn't create.
 
@@ -144,6 +152,7 @@ These make one test suite run against every backend.
   - If the field wasn't focused, focus it and **put the caret at the end**: focusing selects all, and the first keystroke would replace everything.
   - Enter or Space on buttons, Space on toggles.
   - `Scroll { dx, dy }` scrolls a ScrollView like a scroll wheel would, clamped.
+  - `Click(point)` on **drawn** custom widgets: a real down/up pair through your drawn view's event handlers. `Unsupported` elsewhere; native controls often track the mouse in a modal loop.
 - **`native_state(id)`**: **read back from the widget** what it actually shows: text, title, value, placeholder, checked, enabled, frame, children (in native order), focused, and scroll offset. Only cache what the platform can't report (AppKit caches the text style and variant). After every settle, the test harness compares this with the core and fails on any difference. This check has caught every serious backend bug so far.
 - **`capture(id, reply)`**: offscreen RGBA8 at backing scale, rows top to bottom. Reply when the image is ready, right away if possible. Examples:
   - AppKit: `cacheDisplayInRect:toBitmapImageRep:`, which replies immediately.
@@ -166,6 +175,19 @@ Implement `Services`. **Never block**: reply later, from the platform's completi
 - **Menus inside the window** (GTK without a global menu, WinUI): the menu bar takes space the core doesn't know about. Put it above your content host, and report the **remaining** content size in `WindowResized`.
 - Keep the platform's standard menus (Quit, Edit with Cut/Copy/Paste/Undo) and leave their enabling to the platform. The app's own items follow its `enabled` state.
 - `Shortcut::primary` is Ctrl on GTK and WinUI.
+
+## 8a. Escape hatches: custom widgets and native views
+
+The core does the shared work; a backend supplies three things. AppKit's are in `mitsuami-appkit/src/custom.rs`.
+
+1. **A `NativeRender` trait** for custom widgets, in your crate, shaped like AppKit's: `type View`, `create(props, cx)`, `update(view, old, new)`, and optional `measure`, `read` (read the props back from the widget, for the mirror check) and `perform`. Provide `native::<W>() -> Renderer<W>`: wrap a type-erased render in an `Opaque` and pass it to `Renderer::native`. On `Create` of `Custom(_)`, `find_prop!(props, Custom)`: if `custom.native()` is `Some`, downcast it to your render and create the view; otherwise the widget is drawn.
+2. **A drawn view** that rasterizes `DisplayList`s (fill and stroke of rects, rounded rects, ellipses and paths) with the platform's 2D API. Resolve the semantic `Color`s at draw time, so they follow the appearance. Report primary-button `Pointer` down/up in the widget's coordinates, and support `SyntheticInput::Click`. Don't measure drawn widgets (the core does); `native_state` reports `Custom` and `Drawing` as last received.
+3. **`NativeView::<platform>(factory)`** for app-supplied widgets, with a payload type of your own in `Prop::Native`. Run the factory on `Create`, and apply the updates on `Create` and on each `SetProp`.
+
+Also:
+- A context (`AppKitCx`) for factories: the main-thread marker, an `Emitter` that queues `UiEvent::Custom(AnyValue::new(event))` for the node, and a way to hear a control's actions whose targets live as long as the node.
+- **`perform` on custom widgets:** call the render's `perform`. Return `Unsupported` when it doesn't handle an action; the core then emits the event the widget's shared definition maps it to. **On native views:** perform on the accessibility element the way the screen reader would. That can be a child of the view (AppKit: an `NSStepper`'s cell).
+- Put the widget-specific `objc2`-style bindings on your crate's public API (AppKit re-exports `objc2`, `objc2_app_kit`, `objc2_foundation`), so apps use the same versions.
 
 ## 9. Tab order
 
@@ -244,5 +266,6 @@ cargo run -p mitsuami --example showcase        # look at it
 6. `run()` with tick, waker and timer → `run_loop_smoke` exits by itself; the showcase works.
 7. Services + native services checks.
 8. `capture` + visual baselines.
+9. The drawn view, then `NativeRender` and `NativeView` (§8a) → the `escape_hatches` suite passes. Add a native render for the example's `Rating` (`examples/escape_hatches/rating/<os>.rs`) and point its `Render` impl at it.
 
 When something in the contract doesn't fit your platform, **change the contract rather than working around it**, and update the other backends and this guide. Capture and the clipboard became async for exactly this reason.

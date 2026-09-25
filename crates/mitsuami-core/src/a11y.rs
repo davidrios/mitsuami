@@ -29,14 +29,47 @@ pub struct A11yProps {
     pub role: Option<Role>,
     pub label: Option<String>,
     pub description: Option<String>,
+    /// Current value, as read out: "3 of 5", "50%".
+    pub value: Option<String>,
     pub labelled_by: Option<NodeId>,
     /// Remove this node and its subtree from the accessibility tree.
     pub hidden: bool,
 }
 
 impl A11yProps {
+    pub fn new(role: Role) -> A11yProps {
+        A11yProps { role: Some(role), ..A11yProps::default() }
+    }
+
+    pub fn label(mut self, label: impl Into<String>) -> A11yProps {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> A11yProps {
+        self.description = Some(description.into());
+        self
+    }
+
+    pub fn value(mut self, value: impl Into<String>) -> A11yProps {
+        self.value = Some(value.into());
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == A11yProps::default()
+    }
+
+    /// These semantics, with every field `overrides` sets taking its place.
+    pub fn overridden_by(&self, overrides: &A11yProps) -> A11yProps {
+        A11yProps {
+            role: overrides.role.or(self.role),
+            label: overrides.label.clone().or_else(|| self.label.clone()),
+            description: overrides.description.clone().or_else(|| self.description.clone()),
+            value: overrides.value.clone().or_else(|| self.value.clone()),
+            labelled_by: overrides.labelled_by.or(self.labelled_by),
+            hidden: overrides.hidden || self.hidden,
+        }
     }
 }
 

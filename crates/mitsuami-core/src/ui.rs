@@ -14,6 +14,7 @@ use taffy::TaffyTree;
 use crate::a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
 use crate::backend::{AvailableSpace, Backend, EventSink, MeasureRequest, NativeState, PlatformMetrics};
 use crate::command::{Command, EventValue, UiEvent};
+use crate::custom::CustomProps;
 use crate::geometry::{Point, Rect, Size};
 use crate::services::{Alert, MenuBar, OpenFile, SaveFile, ServiceError, Services, reply_future};
 use crate::style::{Style, TextDirection};
@@ -49,6 +50,18 @@ struct Node {
 impl Node {
     fn prop(&self, key: &Prop) -> Option<&Prop> {
         self.props.iter().find(|p| p.key() == key.key())
+    }
+
+    fn custom(&self) -> Option<&CustomProps> {
+        self.props.iter().find_map(|p| match p {
+            Prop::Custom(custom) => Some(custom),
+            _ => None,
+        })
+    }
+
+    /// Drawn custom widgets are measured and drawn by the core.
+    fn drawn(&self) -> Option<&CustomProps> {
+        self.custom().filter(|c| c.is_drawn())
     }
 }
 
@@ -388,7 +401,7 @@ impl Ui {
                 inner.styles_dirty = true;
             }
             if node.kind.is_native() {
-                inner.pending.push(Command::SetProp { id, prop });
+                inner.queue_prop(id, prop);
             }
         }
         self.changed();
@@ -584,17 +597,25 @@ impl Ui {
             }
             let next = self.inner.borrow().events.pop();
             let Some((id, event)) = next else { break };
-            let handlers = {
+            let (handlers, meaning) = {
                 let mut inner = self.inner.borrow_mut();
                 inner.absorb(id, &event);
-                inner.nodes.get(&id).map(|n| n.handlers.clone()).unwrap_or_default()
+                let node = inner.nodes.get(&id);
+                // A drawn widget decides what a pointer event means.
+                let meaning = match (&event, node.and_then(|n| n.drawn().map(|c| (c, n.frame.size)))) {
+                    (UiEvent::Pointer(pointer), Some((custom, size))) => custom.pointer(size, pointer),
+                    _ => None,
+                };
+                (node.map(|n| n.handlers.clone()).unwrap_or_default(), meaning)
             };
             self.changed();
-            mitsuami_reactive::batch(|| {
-                for handler in &handlers {
-                    handler(&event);
-                }
-            });
+            for event in std::iter::once(event).chain(meaning.map(UiEvent::Custom)) {
+                mitsuami_reactive::batch(|| {
+                    for handler in &handlers {
+                        handler(&event);
+                    }
+                });
+            }
         }
     }
 
@@ -639,8 +660,24 @@ impl Ui {
 
     /// Asks the backend to perform an accessibility action, then dispatches
     /// the events it produced.
+    ///
+    /// Custom widgets the backend can't act on get the event their shared
+    /// definition gives the action (e.g. `Increment` → a new value).
     pub fn perform(&self, id: NodeId, action: &A11yAction) -> Result<(), ActionError> {
-        let result = self.inner.borrow_mut().backend.perform(id, action);
+        let result = {
+            let mut inner = self.inner.borrow_mut();
+            let result = inner.backend.perform(id, action);
+            match (result, inner.nodes.get(&id).and_then(|n| n.custom())) {
+                (Err(ActionError::Unsupported), Some(custom)) => match custom.action(action) {
+                    Some(event) => {
+                        inner.events.emit(id, UiEvent::Custom(event));
+                        Ok(())
+                    }
+                    None => Err(ActionError::Unsupported),
+                },
+                (result, _) => result,
+            }
+        };
         self.process_events();
         result
     }
@@ -816,6 +853,24 @@ impl Ui {
 }
 
 impl Inner {
+    /// Sends a prop. Until the node's `Create` has gone out, the prop joins
+    /// it, so backends create every widget with its initial props (reactive
+    /// ones included): custom widgets and native views can't be created
+    /// without theirs.
+    fn queue_prop(&mut self, id: NodeId, prop: Prop) {
+        let create = self.pending.iter_mut().rev().find_map(|command| match command {
+            Command::Create { id: created, props, .. } if *created == id => Some(props),
+            _ => None,
+        });
+        match create {
+            Some(props) => {
+                props.retain(|p| p.key() != prop.key());
+                props.push(prop);
+            }
+            None => self.pending.push(Command::SetProp { id, prop }),
+        }
+    }
+
     fn mark_resync(&mut self, id: NodeId) {
         if let Some(native) = self.native_ancestor_or_self(id) {
             self.resync.insert(native);
@@ -1003,7 +1058,7 @@ impl Inner {
             let node = &self.nodes[&window];
             let Some(root) = node.taffy else { continue };
             let size = node.window_size;
-            let Inner { taffy, backend, .. } = self;
+            let Inner { taffy, backend, nodes, metrics, .. } = self;
             let available = taffy::Size {
                 width: taffy::AvailableSpace::Definite(size.width),
                 height: taffy::AvailableSpace::Definite(size.height),
@@ -1015,15 +1070,19 @@ impl Inner {
                     |_, _| 0.0,
                     |known, available| match context {
                         Some(id) => {
-                            let size = backend.measure(
-                                *id,
-                                MeasureRequest {
-                                    known_width: known.width,
-                                    known_height: known.height,
-                                    available_width: space(available.width),
-                                    available_height: space(available.height),
-                                },
-                            );
+                            let request = MeasureRequest {
+                                known_width: known.width,
+                                known_height: known.height,
+                                available_width: space(available.width),
+                                available_height: space(available.height),
+                            };
+                            let size = match nodes.get(id).and_then(|n| n.drawn()) {
+                                Some(custom) => {
+                                    let size = custom.measure_drawn(&request, metrics).unwrap_or(Size::ZERO);
+                                    Size::new(known.width.unwrap_or(size.width), known.height.unwrap_or(size.height))
+                                }
+                                None => backend.measure(*id, request),
+                            };
                             taffy::Size { width: size.width, height: size.height }
                         }
                         None => taffy::Size::ZERO,
@@ -1032,6 +1091,26 @@ impl Inner {
             });
             self.nodes.get_mut(&window).unwrap().frame = Rect { origin: Point::ZERO, size };
             self.collect_frames(window);
+        }
+        self.update_drawings();
+    }
+
+    /// Redraws drawn custom widgets, sending the display lists that changed
+    /// (new props, a new size, new metrics) along with the frames.
+    fn update_drawings(&mut self) {
+        let mut changed = Vec::new();
+        for (id, node) in &self.nodes {
+            let Some(drawing) = node.drawn().and_then(|c| c.draw(node.frame.size, &self.metrics)) else { continue };
+            let drawing = Prop::Drawing(drawing);
+            if node.prop(&drawing) != Some(&drawing) {
+                changed.push((*id, drawing));
+            }
+        }
+        for (id, prop) in changed {
+            let node = self.nodes.get_mut(&id).unwrap();
+            node.props.retain(|p| p.key() != prop.key());
+            node.props.push(prop.clone());
+            self.pending.push(Command::SetProp { id, prop });
         }
     }
 
@@ -1171,15 +1250,20 @@ impl Inner {
 
     fn a11y(&self, id: NodeId, parent_origin: Point) -> Vec<A11yNode> {
         let node = &self.nodes[&id];
-        if node.a11y.hidden || node.style.is_hidden() {
+        // Custom widgets bring their own semantics; the app's overrides win.
+        let a11y = match node.custom() {
+            Some(custom) => custom.a11y().overridden_by(&node.a11y),
+            None => node.a11y.clone(),
+        };
+        if a11y.hidden || node.style.is_hidden() {
             return Vec::new();
         }
         let frame = if node.kind == WidgetKind::Window { node.frame } else { node.frame.offset(parent_origin) };
         let origin = Inner::child_origin(node, frame);
         let children: Vec<A11yNode> = node.native_children.iter().flat_map(|c| self.a11y(*c, origin)).collect();
 
-        let labelled = node.a11y.label.is_some() || node.a11y.labelled_by.is_some();
-        let role = node.a11y.role.unwrap_or(match node.kind {
+        let labelled = a11y.label.is_some() || a11y.labelled_by.is_some();
+        let role = a11y.role.unwrap_or(match node.kind {
             WidgetKind::Window => Role::Window,
             WidgetKind::Container if labelled => Role::Group,
             WidgetKind::Container | WidgetKind::Fragment => Role::None,
@@ -1196,23 +1280,21 @@ impl Inner {
         }
         let props = &node.props;
         let name =
-            node.a11y.label.clone().or_else(|| node.a11y.labelled_by.and_then(|l| self.text_of(l))).or_else(|| {
-                match node.kind {
-                    WidgetKind::Window => crate::find_prop!(props, Title),
-                    WidgetKind::Text => crate::find_prop!(props, Text),
-                    WidgetKind::Button | WidgetKind::Checkbox | WidgetKind::Switch => crate::find_prop!(props, Label),
-                    WidgetKind::TextInput => crate::find_prop!(props, Placeholder),
-                    _ => None,
-                }
+            a11y.label.clone().or_else(|| a11y.labelled_by.and_then(|l| self.text_of(l))).or_else(|| match node.kind {
+                WidgetKind::Window => crate::find_prop!(props, Title),
+                WidgetKind::Text => crate::find_prop!(props, Text),
+                WidgetKind::Button | WidgetKind::Checkbox | WidgetKind::Switch => crate::find_prop!(props, Label),
+                WidgetKind::TextInput => crate::find_prop!(props, Placeholder),
+                _ => None,
             });
         vec![A11yNode {
             id,
             role,
             name,
-            description: node.a11y.description.clone(),
+            description: a11y.description,
             value: match node.kind {
                 WidgetKind::TextInput => Some(crate::find_prop!(props, Value).unwrap_or_default()),
-                _ => None,
+                _ => a11y.value,
             },
             checked: match node.kind {
                 WidgetKind::Checkbox | WidgetKind::Switch => Some(crate::find_prop!(props, Checked).unwrap_or(false)),

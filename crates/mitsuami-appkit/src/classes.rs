@@ -5,12 +5,14 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use mitsuami_core::{EventSink, EventValue, NodeId, Point, Size, UiEvent, WidgetKind};
+use mitsuami_core::{
+    DisplayList, EventSink, EventValue, NodeId, Point, PointerEvent, PointerKind, Size, UiEvent, WidgetKind,
+};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSButton, NSColor, NSControl, NSControlStateValueOn, NSControlTextEditingDelegate, NSRectFill, NSSwitch,
+    NSButton, NSColor, NSControl, NSControlStateValueOn, NSControlTextEditingDelegate, NSEvent, NSRectFill, NSSwitch,
     NSTextField, NSTextFieldDelegate, NSTextView, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
@@ -261,5 +263,99 @@ impl WindowDelegate {
             view = unsafe { current.superview() };
         }
         None
+    }
+}
+
+pub(crate) struct ClosureIvars {
+    handler: Box<dyn Fn(&AnyObject)>,
+}
+
+define_class!(
+    /// A control target that runs a closure: how native renders and native
+    /// views hear about their controls' actions.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = ClosureIvars]
+    pub(crate) struct ClosureTarget;
+
+    impl ClosureTarget {
+        #[unsafe(method(fire:))]
+        fn fire(&self, sender: &AnyObject) {
+            (self.ivars().handler)(sender);
+        }
+    }
+
+    unsafe impl NSObjectProtocol for ClosureTarget {}
+);
+
+impl ClosureTarget {
+    pub(crate) fn new(mtm: MainThreadMarker, handler: impl Fn(&AnyObject) + 'static) -> Retained<ClosureTarget> {
+        let this = ClosureTarget::alloc(mtm).set_ivars(ClosureIvars { handler: Box::new(handler) });
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+pub(crate) struct DrawnIvars {
+    id: NodeId,
+    events: EventSink,
+    drawing: RefCell<DisplayList>,
+}
+
+define_class!(
+    /// A drawn custom widget: rasterizes the display list the core sends,
+    /// and reports pointer events for the core to interpret.
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = DrawnIvars]
+    pub(crate) struct DrawnView;
+
+    impl DrawnView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, _dirty: NSRect) {
+            crate::custom::rasterize(&self.ivars().drawing.borrow());
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            self.pointer(PointerKind::Down, event);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            self.pointer(PointerKind::Up, event);
+        }
+    }
+);
+
+impl DrawnView {
+    pub(crate) fn new(mtm: MainThreadMarker, id: NodeId, events: EventSink) -> Retained<DrawnView> {
+        let this =
+            DrawnView::alloc(mtm).set_ivars(DrawnIvars { id, events, drawing: RefCell::new(DisplayList::default()) });
+        unsafe { msg_send![super(this), initWithFrame: zero_rect()] }
+    }
+
+    pub(crate) fn drawing(&self) -> DisplayList {
+        self.ivars().drawing.borrow().clone()
+    }
+
+    pub(crate) fn set_drawing(&self, drawing: DisplayList) {
+        *self.ivars().drawing.borrow_mut() = drawing;
+        self.setNeedsDisplay(true);
+    }
+
+    fn pointer(&self, kind: PointerKind, event: &NSEvent) {
+        let p = self.convertPoint_fromView(event.locationInWindow(), None);
+        let position = Point::new(p.x as f32, p.y as f32);
+        self.ivars().events.emit(self.ivars().id, UiEvent::Pointer(PointerEvent { kind, position }));
     }
 }

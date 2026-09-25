@@ -11,7 +11,8 @@ use mitsuami_core::backend::{
 };
 use mitsuami_core::units::SpacingScale;
 use mitsuami_core::{
-    ButtonVariant, Command, EventValue, NodeId, Point, Prop, Rect, ScrollAxes, Size, TextStyle, UiEvent, WidgetKind,
+    ButtonVariant, Command, CustomProps, EventValue, NodeId, Opaque, Point, Prop, Rect, ScrollAxes, Size, TextStyle,
+    UiEvent, WidgetKind, find_prop,
 };
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
@@ -19,14 +20,16 @@ use objc2::{MainThreadMarker, MainThreadOnly, Message, msg_send, sel};
 use objc2_app_kit::{
     NSAccessibility, NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
     NSApplication, NSBackingStoreType, NSBitmapFormat, NSButton, NSControl, NSControlStateValueOff,
-    NSControlStateValueOn, NSFont, NSFontTextStyle, NSFontTextStyleBody, NSFontTextStyleCallout,
-    NSFontTextStyleCaption1, NSFontTextStyleHeadline, NSFontTextStyleLargeTitle, NSFontTextStyleTitle1,
-    NSFontWeightRegular, NSScreen, NSScrollView, NSStandardKeyBindingResponding, NSSwitch, NSTextField, NSView,
-    NSViewBoundsDidChangeNotification, NSWindow, NSWindowOrderingMode, NSWindowStyleMask, NSWorkspace,
+    NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSEventType, NSFont, NSFontTextStyle, NSFontTextStyleBody,
+    NSFontTextStyleCallout, NSFontTextStyleCaption1, NSFontTextStyleHeadline, NSFontTextStyleLargeTitle,
+    NSFontTextStyleTitle1, NSFontWeightRegular, NSScreen, NSScrollView, NSStandardKeyBindingResponding, NSSwitch,
+    NSTextField, NSView, NSViewBoundsDidChangeNotification, NSWindow, NSWindowOrderingMode, NSWindowStyleMask,
+    NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNotificationCenter, NSPoint, NSRange, NSRect, NSSize, NSString};
 
-use crate::classes::{ActionTarget, HostView, ViewMap, WindowDelegate};
+use crate::classes::{ActionTarget, ClosureTarget, DrawnView, HostView, ViewMap, WindowDelegate};
+use crate::custom::{AppKitCx, Emitter, ErasedRender, NativePayload};
 
 /// How the backend behaves; apps and tests want different things.
 #[derive(Clone, Debug)]
@@ -55,7 +58,11 @@ impl Default for BackendOptions {
 }
 
 enum Widget {
-    Window { window: Retained<NSWindow>, host: Retained<HostView>, _delegate: Retained<WindowDelegate> },
+    Window {
+        window: Retained<NSWindow>,
+        host: Retained<HostView>,
+        _delegate: Retained<WindowDelegate>,
+    },
     Host(Retained<HostView>),
     Label(Retained<NSTextField>),
     Field(Retained<NSTextField>),
@@ -63,7 +70,26 @@ enum Widget {
     Checkbox(Retained<NSButton>),
     Switch(Retained<NSSwitch>),
     Scroll(Retained<NSScrollView>),
+    /// A custom widget with an AppKit render, and the props it last got.
+    Custom {
+        view: Retained<NSView>,
+        render: Rc<dyn ErasedRender>,
+        props: CustomProps,
+    },
+    /// A drawn custom widget.
+    Drawn {
+        view: Retained<DrawnView>,
+        props: CustomProps,
+    },
+    /// A native view from app code, and the last `Prop::Native` it got.
+    Native {
+        view: Retained<NSView>,
+        measure: Option<NativeMeasure>,
+        last: Opaque,
+    },
 }
+
+type NativeMeasure = Rc<dyn Fn(&NSView, &MeasureRequest) -> Size>;
 
 impl Widget {
     fn view(&self) -> &NSView {
@@ -74,6 +100,8 @@ impl Widget {
             Widget::Button(v) | Widget::Checkbox(v) => v,
             Widget::Switch(v) => v,
             Widget::Scroll(v) => v,
+            Widget::Custom { view, .. } | Widget::Native { view, .. } => view,
+            Widget::Drawn { view, .. } => view,
         }
     }
 
@@ -82,7 +110,12 @@ impl Widget {
             Widget::Label(v) | Widget::Field(v) => Some(v),
             Widget::Button(v) | Widget::Checkbox(v) => Some(v),
             Widget::Switch(v) => Some(v),
-            Widget::Window { .. } | Widget::Host(_) | Widget::Scroll(_) => None,
+            Widget::Window { .. }
+            | Widget::Host(_)
+            | Widget::Scroll(_)
+            | Widget::Custom { .. }
+            | Widget::Drawn { .. }
+            | Widget::Native { .. } => None,
         }
     }
 }
@@ -92,6 +125,8 @@ struct Node {
     widget: Widget,
     /// Controls only hold weak references to their target and delegate.
     _target: Option<Retained<ActionTarget>>,
+    /// Action targets of native renders and native views.
+    _targets: Vec<Retained<ClosureTarget>>,
     parent: Option<NodeId>,
     /// Props AppKit can't report back faithfully.
     text_style: Option<TextStyle>,
@@ -282,6 +317,7 @@ impl State {
         )
         .then(|| ActionTarget::new(mtm, id, kind, self.events.clone()));
         let action = Some(sel!(fire:));
+        let mut targets = Vec::new();
         let target_obj: Option<&AnyObject> = target.as_deref().map(|t| t.as_ref());
         let widget = match kind {
             WidgetKind::Window => {
@@ -315,8 +351,40 @@ impl State {
                 }
                 Widget::Window { window, host, _delegate: delegate }
             }
-            WidgetKind::Container | WidgetKind::Custom(_) | WidgetKind::Native => {
-                Widget::Host(HostView::new(mtm, false))
+            WidgetKind::Container => Widget::Host(HostView::new(mtm, false)),
+            WidgetKind::Custom(_) => {
+                let Command::Create { props, .. } = command else { unreachable!() };
+                let Some(custom) = find_prop!(props, Custom) else {
+                    violation(command, "a custom widget needs its Prop::Custom")
+                };
+                match custom.native() {
+                    Some(native) => {
+                        let Some(render) = native.downcast_ref::<Rc<dyn ErasedRender>>().cloned() else {
+                            violation(command, "the native render is not an AppKit one")
+                        };
+                        let mut cx = AppKitCx::new(mtm, id, self.events.clone(), &mut targets);
+                        let view = render.create(custom.props(), &mut cx);
+                        Widget::Custom { view, render, props: custom }
+                    }
+                    None => Widget::Drawn { view: DrawnView::new(mtm, id, self.events.clone()), props: custom },
+                }
+            }
+            WidgetKind::Native => {
+                let Command::Create { props, .. } = command else { unreachable!() };
+                let Some(opaque) = find_prop!(props, Native) else {
+                    violation(command, "a native view needs its Prop::Native")
+                };
+                let Some(payload) = opaque.downcast_ref::<NativePayload>() else {
+                    violation(command, "the native view is not an AppKit one")
+                };
+                let Some(create) = payload.spec.create.borrow_mut().take() else {
+                    violation(command, "this native view was already created")
+                };
+                let measure = payload.spec.measure.clone();
+                let mut cx = AppKitCx::new(mtm, id, self.events.clone(), &mut targets);
+                let view = create(&mut cx);
+                payload.apply(&view);
+                Widget::Native { view, measure, last: opaque }
             }
             WidgetKind::Text => {
                 let label = NSTextField::wrappingLabelWithString(&ns(""), mtm);
@@ -374,12 +442,15 @@ impl State {
             widget.view().setFrame(crate::classes::zero_rect());
         }
         self.by_view.borrow_mut().insert(key(widget.view()), id);
-        self.nodes.insert(id, Node { kind, widget, _target: target, parent: None, text_style: None, variant: None });
+        self.nodes.insert(
+            id,
+            Node { kind, widget, _target: target, _targets: targets, parent: None, text_style: None, variant: None },
+        );
     }
 
     fn set_prop(&mut self, id: NodeId, prop: &Prop, command: &Command) {
         let Some(node) = self.nodes.get_mut(&id) else { violation(command, "node does not exist") };
-        match (prop, &node.widget) {
+        match (prop, &mut node.widget) {
             (Prop::Title(t), Widget::Window { window, .. }) => window.setTitle(&ns(t)),
             (Prop::Text(t), Widget::Label(l)) => l.setStringValue(&ns(t)),
             (Prop::Label(t), Widget::Button(b) | Widget::Checkbox(b)) => b.setTitle(&ns(t)),
@@ -411,6 +482,23 @@ impl State {
                 b.setHasDestructiveAction(*variant == ButtonVariant::Destructive);
                 b.setBordered(*variant != ButtonVariant::Plain);
                 node.variant = Some(*variant);
+            }
+            (Prop::Custom(new), Widget::Custom { view, render, props }) => {
+                if props != new {
+                    render.update(view, props.props(), new.props());
+                    *props = new.clone();
+                }
+            }
+            (Prop::Custom(new), Widget::Drawn { props, .. }) => *props = new.clone(),
+            (Prop::Drawing(drawing), Widget::Drawn { view, .. }) => view.set_drawing(drawing.clone()),
+            (Prop::Native(opaque), Widget::Native { view, last, .. }) => {
+                // The creating payload was applied on creation.
+                if opaque != last
+                    && let Some(payload) = opaque.downcast_ref::<NativePayload>()
+                {
+                    payload.apply(view);
+                }
+                *last = opaque.clone();
             }
             _ => {}
         }
@@ -568,6 +656,27 @@ fn ceil_size(size: NSSize) -> Size {
     Size::new(size.width.ceil() as f32, size.height.ceil() as f32)
 }
 
+/// The object assistive technology acts on for a view: the view itself, or
+/// for views that aren't accessibility elements (an `NSStepper`), their
+/// single accessibility child (its cell), as VoiceOver finds it.
+fn a11y_element(view: &NSView) -> Retained<AnyObject> {
+    let mut element: Retained<AnyObject> = view.retain().into();
+    loop {
+        let is_element: bool = unsafe { msg_send![&*element, isAccessibilityElement] };
+        let children: Option<Retained<NSArray<AnyObject>>> = unsafe { msg_send![&*element, accessibilityChildren] };
+        match children {
+            Some(children) if !is_element && children.len() == 1 => element = children.objectAtIndex(0),
+            _ => return element,
+        }
+    }
+}
+
+/// `intrinsicContentSize`, with "no intrinsic size" (-1) as zero.
+fn intrinsic(view: &NSView) -> Size {
+    let size = view.intrinsicContentSize();
+    ceil_size(NSSize::new(size.width.max(0.0), size.height.max(0.0)))
+}
+
 impl Backend for AppKitBackend {
     fn init(&mut self, events: EventSink) {
         self.state.borrow_mut().events = events;
@@ -613,19 +722,35 @@ impl Backend for AppKitBackend {
             }
             Widget::Button(v) | Widget::Checkbox(v) => ceil_size(v.intrinsicContentSize()),
             Widget::Switch(v) => ceil_size(v.intrinsicContentSize()),
-            Widget::Window { .. } | Widget::Host(_) | Widget::Scroll(_) => Size::ZERO,
+            Widget::Custom { view, render, props } => {
+                render.measure(view, props.props(), &request).unwrap_or_else(|| intrinsic(view))
+            }
+            Widget::Native { view, measure, .. } => match measure {
+                Some(measure) => measure(view, &request),
+                None => intrinsic(view),
+            },
+            // Measured by the core.
+            Widget::Drawn { .. } | Widget::Window { .. } | Widget::Host(_) | Widget::Scroll(_) => Size::ZERO,
         };
         Size::new(request.known_width.unwrap_or(natural.width), request.known_height.unwrap_or(natural.height))
     }
 
     fn perform(&mut self, id: NodeId, action: &A11yAction) -> Result<(), ActionError> {
-        let (widget_view, control_enabled, kind, events) = {
+        let (widget_view, control_enabled, kind, events, custom) = {
             let state = self.state.borrow();
             let node = state.nodes.get(&id).ok_or(ActionError::UnknownNode)?;
-            (node.widget.view().retain(), node.widget.control().map(|c| c.isEnabled()), node.kind, state.events.clone())
+            let custom = match &node.widget {
+                Widget::Custom { render, props, .. } => Some((render.clone(), props.props().clone())),
+                _ => None,
+            };
+            let enabled = node.widget.control().map(|c| c.isEnabled());
+            (node.widget.view().retain(), enabled, node.kind, state.events.clone(), custom)
         };
         if control_enabled == Some(false) {
             return Err(ActionError::Disabled);
+        }
+        if let Some((render, props)) = custom {
+            return render.perform(&widget_view, &props, action, &Emitter::new(events, id));
         }
         // No state borrow below: AppKit calls back into our targets.
         match (action, kind) {
@@ -634,6 +759,17 @@ impl Backend for AppKitBackend {
                 // value is unreliable for windows that aren't on screen (it
                 // reports NO after pressing), so it is ignored.
                 let _: bool = unsafe { msg_send![&*widget_view, accessibilityPerformPress] };
+            }
+            // Native views: whatever their accessibility element does.
+            // Return values are ignored for the same reason as above.
+            (A11yAction::Activate, WidgetKind::Native) => {
+                let _: bool = unsafe { msg_send![&*a11y_element(&widget_view), accessibilityPerformPress] };
+            }
+            (A11yAction::Increment, WidgetKind::Native) => {
+                let _: bool = unsafe { msg_send![&*a11y_element(&widget_view), accessibilityPerformIncrement] };
+            }
+            (A11yAction::Decrement, WidgetKind::Native) => {
+                let _: bool = unsafe { msg_send![&*a11y_element(&widget_view), accessibilityPerformDecrement] };
             }
             (A11yAction::SetValue(text), WidgetKind::TextInput) => {
                 let field: &NSTextField = widget_view.downcast_ref().ok_or(ActionError::Unsupported)?;
@@ -656,6 +792,33 @@ impl Backend for AppKitBackend {
     }
 
     fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError> {
+        if let SyntheticInput::Click(point) = input {
+            // Drawn widgets only: native controls track the mouse in a
+            // loop of their own, waiting for real events.
+            let view = match self.state.borrow().nodes.get(&id).map(|n| &n.widget) {
+                Some(Widget::Drawn { view, .. }) => view.clone(),
+                Some(_) => return Err(ActionError::Unsupported),
+                None => return Err(ActionError::UnknownNode),
+            };
+            let window = view.window().ok_or(ActionError::Unsupported)?;
+            let location = view.convertPoint_toView(NSPoint::new(point.x as f64, point.y as f64), None);
+            for (kind, up) in [(NSEventType::LeftMouseDown, false), (NSEventType::LeftMouseUp, true)] {
+                let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                    kind,
+                    location,
+                    NSEventModifierFlags::empty(),
+                    0.0,
+                    window.windowNumber(),
+                    None,
+                    0,
+                    1,
+                    if up { 0.0 } else { 1.0 },
+                )
+                .ok_or(ActionError::Unsupported)?;
+                if up { view.mouseUp(&event) } else { view.mouseDown(&event) }
+            }
+            return Ok(());
+        }
         if let SyntheticInput::Scroll { dx, dy } = input {
             let scroll = match self.state.borrow().nodes.get(&id).map(|n| &n.widget) {
                 Some(Widget::Scroll(scroll)) => scroll.clone(),
@@ -754,6 +917,14 @@ impl Backend for AppKitBackend {
                     _ => ScrollAxes::Vertical,
                 }))
             }
+            Widget::Custom { view, render, props: last } => {
+                props.push(Prop::Custom(last.with_props(render.read(view, last.props()))))
+            }
+            Widget::Drawn { view, props: last } => {
+                props.push(Prop::Custom(last.clone()));
+                props.push(Prop::Drawing(view.drawing()));
+            }
+            Widget::Native { last, .. } => props.push(Prop::Native(last.clone())),
             Widget::Host(_) => {}
         }
         if let Some(control) = node.widget.control() {
