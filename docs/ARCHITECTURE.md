@@ -127,7 +127,7 @@ This is the React Native / Yoga model:
   - GTK: a `gtk::Widget` subclass whose `size_allocate` places children at our computed frames.
 - Leaf widgets report their **intrinsic size** through `measure(id, known, available)`:
   - macOS: `fittingSize` / `intrinsicContentSize`, plus `preferredMaxLayoutWidth` for wrapping text.
-  - WinUI: `FrameworkElement.Measure`.
+  - WinUI: `UIElement.Measure` + `DesiredSize`, only once the element is in the live tree, with our frame's `Width`/`Height` lifted to Auto for the call (§17).
   - GTK: `gtk_widget_measure`.
 - [Taffy](https://github.com/DioxusLabs/taffy) computes flexbox, grid and block layout, using those sizes for leaves.
 
@@ -358,8 +358,8 @@ impl Render for Rating {
 - **A widget native on one platform stands in on the others.** The renderer uses the first render it has: native, then drawn, then composed. A native render is either the platform's own control (`native::<W>()`) or built **ad hoc** from the platform's widgets the way that platform's apps build it (`ad_hoc::<W>()`), so it still looks at home. `Renderer::is_native()` is true only for the platform's own control, so a screen can be honest about it.
 - The `escape_hatches` example is one screen for every platform with three such widgets:
   - a lock: native on GTK (`GtkLockButton`), composed elsewhere;
-  - a rating: native on macOS (`NSLevelIndicator`), ad hoc on GTK (star buttons, as GNOME Software builds it), drawn elsewhere;
-  - a pips pager: WinUI's, drawn until the WinUI backend renders it.
+  - a rating: native on macOS (`NSLevelIndicator`) and Windows (`RatingControl`), ad hoc on GTK (star buttons, as GNOME Software builds it), drawn elsewhere;
+  - a pips pager: native on Windows (WinUI's `PipsPager`), drawn elsewhere.
 - **A composed render** gets the props (reactive), a way to emit the widget's events, and the app's accessible label, which it puts on the control that stands for the widget. It builds as a plain container, so its built-in widgets carry the semantics.
 - **Compile-time coverage:** using a widget requires `Render`, and `Render` has to name a render that exists on the platform being built: a `NativeRender` impl or a `Drawn` one. A missing render doesn't build.
 - **Transport:** commands carry `WidgetKind::Custom(NAME)` and `Prop::Custom(CustomProps)`: the props as an `AnyValue` (type-erased, but still compared and printed with their own `PartialEq` and `Debug`) plus the widget's definition (semantics, action mapping, renders). Events come back as `UiEvent::Custom(AnyValue)`. Props don't need to be serializable. The native render travels with the props, so backends keep no registry.
@@ -625,15 +625,14 @@ This is exposed as `Backend::capture`.
 
 ## 13. Risks, ranked
 
-1. **WinUI 3 through `windows-rs` 0.100 / `windows-reactor`.**
-   - Microsoft now ships `windows-reactor`, a declarative WinUI 3 framework (60+ controls, targets Windows App SDK 2.4.0). `windows-reactor-setup` stages the App Runtime for self-contained apps. Bootstrapping is therefore largely solved.
-   - **The open problem is integration, not access.** Reactor has its own component/state/effect system, and we must not run two reactive systems on top of each other. We need *imperative* access to the XAML elements: create, set a property, insert into a `Canvas`, `Measure`, and events.
-   - Options, in order of preference:
-     - (a) Reactor exposes raw element handles or an imperative layer we can drive directly.
-     - (b) Use the XAML bindings reactor itself is built on (or generate them with `windows-bindgen`) and use only `windows-reactor-setup` for bootstrap.
-     - (c) Host reactor components for leaf widgets only. This is the least attractive option.
-   - XAML subclassing from Rust is painful. The design avoids needing it: `Canvas` hosts, and no custom `Panel`.
-   - **→ Spike this first**, before committing to details. The spike: a window, a Button inside a Canvas, a click handler and measure calls. It also answers which of (a), (b) or (c) is viable. A C++/WinRT shim remains the last-resort fallback.
+1. **WinUI 3 through `windows-rs` 0.100 / `windows-reactor`.** ✅ Retired by the M0.5 spike (§17).
+   - Microsoft ships `windows-reactor`, a declarative WinUI 3 framework (60+ controls, targets Windows App SDK 2.4.0), and `windows-reactor-setup`, which stages the App Runtime for self-contained apps.
+   - The problem was integration, not access. Reactor has its own component/state/effect system, we must not run two reactive systems on top of each other, and we need *imperative* access to the XAML elements.
+   - The options were: (a) drive reactor's own elements imperatively; (b) generate the XAML bindings ourselves the way reactor does, and keep reactor only for bootstrap and staging; (c) host reactor components for leaf widgets.
+   - **Chosen: (b).**
+     - (a) is closed. Reactor's `ElementRef` only offers narrow requests (focus, swap chain, WebView2, child visual). It has no element handle and no `Measure`, and reactor's WinUI bindings are crate-private.
+     - (b) works end to end with `windows-bindgen` 0.100. It needs no XAML subclassing: the `Application` is composed from Rust, and hosts are plain `Canvas`es.
+     - The C++/WinRT shim fallback is no longer needed.
 2. **Measurement fidelity.** Native intrinsic sizes can be quirky: NSTextField wrapping, and WinUI's Measure needing to be in the live tree. Headless tests can't catch this. The backend conformance suite and the visual gallery (§12) cover it.
 3. **The own reactive runtime is on the critical path.** Everything depends on it: effect ownership and cleanup, batching, and flush ordering relative to layout. It needs a thorough scenario-based integration suite before anything is built on top of it.
 
@@ -644,15 +643,13 @@ This is exposed as `Backend::capture`.
 | Milestone | Scope | Done when |
 |---|---|---|
 | **M0 — Core + test harness** ✅ | Workspace; `mitsuami-reactive`; node tree; styles and units; Taffy integration; `Command` protocol; headless backend; `mitsuami-test` basics (custom runner, a11y queries, actions, settle, tree/layout/wireframe snapshots) | Counter and a flex/grid form pass headless integration tests written with the public test API; the reactive suite passes |
-| **M0.5 — WinUI spike** (in parallel) | Throwaway, using windows-rs 0.100: a window, a Canvas, a Button, Click and Measure, driven imperatively | Integration route (a/b/c) chosen |
+| **M0.5 — WinUI spike** ✅ | Throwaway, using windows-rs 0.100: a window, a Canvas, a Button, Click and Measure, driven imperatively (`spikes/winui`) | Integration route (a/b/c) chosen: (b) |
 | **M1 — AppKit** ✅ | Window, View hosts, Text, Button, TextInput, Checkbox, Switch; run-loop flush; measure; resize → relayout | The M0 tests pass with `--native` on macOS; conformance suite v1 passes; `Backend::capture` works and a first visual baseline exists |
 | **M2 — GTK 4** ✅ | The same widget set (developed and tested on Linux, e.g. a VM or CI) | The same tests and conformance suite pass with `--native` on Linux |
-| **M3 — WinUI 3** | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
-| **M4 — Escape hatches** ✅ (AppKit, GTK) | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn and composed fallbacks) | Demo: one screen for every platform, with three custom widgets, each native on one platform and built ad hoc, drawn or composed on the others |
+| **M3 — WinUI 3** ✅ | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
+| **M4 — Escape hatches** ✅ | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn and composed fallbacks) | Demo: one screen for every platform, with three custom widgets, each native where the platform has the control and built ad hoc, drawn or composed elsewhere |
 | **M5 — Ergonomics** | `#[component]`, `view!`, stores, resources | Demo rewritten with macros |
 | **M6 — Visual review** | Stories, the variant matrix, perceptual diff, `cargo mitsuami visual review` HTML report, CI on three OSes | A PR that changes a widget shows up as a reviewable visual diff on all three platforms |
-
-M4's custom widget has a native render on macOS and uses the drawn render on Windows and Linux. The GTK and WinUI counterparts of `NativeRender` and `NativeView::appkit` arrive with those backends (M2/M3); BACKENDS.md §8a says what they involve.
 
 Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, dialogs beyond an alert, the a11y implementation (the model exists), animations, and a devtools inspector.
 
@@ -670,6 +667,7 @@ Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, d
 | Layout ownership | Ours (Taffy); native widgets positioned absolutely |
 | Toolkit per platform | Strictly native: AppKit / WinUI 3 / GTK 4, one per OS, no cross-toolkit dev builds |
 | Windows bindings | windows-rs 0.100+ (`windows-reactor` ecosystem, WinAppSDK 2.4); MSRV 1.95, edition 2024 |
+| WinUI integration | Route (b): our own `windows-bindgen` bindings (minimal mode, member filters) over the WinAppSDK metadata, driven imperatively. No `windows-reactor` at runtime. `windows-reactor-setup` stays an option for self-contained staging |
 | Platform vs runtime checks | Platform is compile-time (`platform!`); capabilities are runtime |
 | Testing | No unit tests. Integration (headless) + e2e (native) with one API; a11y-driven queries and actions; Chromatic-style visual regression; testing toolkit shipped to users |
 
@@ -730,8 +728,78 @@ What the GTK 4 backend taught us:
 - **`GtkLockButton` is deprecated since GTK 4.10** and gone in GTK 5, but it's in every GTK 4. It shows a `GPermission`, and gtk4-rs can't subclass one, so the example registers a small one through GIO's C API: it reports what the props say, and acquiring or releasing just succeeds. The button's click is the request the app answers, like any controlled widget.
 - **Focus requests wait for the structure.** `Ui::focus` right after building a node (a composed field focusing itself) used to reach the backend before the node was in a window, where no toolkit can focus it; headless didn't mind. Focus commands now go at the end of the batch's structure.
 
-## 17. Open questions
 
-- The exact Windows floor for Windows App SDK 2.4.
-- Whether `windows-reactor` allows imperative element access (answered by the M0.5 spike).
+### M4 on WinUI
+
+- **Custom widgets and native views on WinUI** follow the same shape: `mitsuami_winui::NativeRender` (any XAML element, from `mitsuami::winui::bindings` or bindings of the app's own), `NativeView::xaml(factory)`, and `WinUiCx` with an `Emitter`. windows-rs unsubscribes when an event's `EventRevoker` drops, so `cx.keep(revoker)` ties a subscription to the node.
+- **Native renders and native views sit in a `Border`** that carries the core's frame, with the control inside. Many XAML controls size themselves (`RatingControl` sets its own `Width` once its template applies), which desynced frames when the frame went on the control. Accessibility props, focus and UI Automation go to the control inside.
+- **Observe properties, not change events.** `RatingControl.ValueChanged` isn't raised for values a screen reader sets through UI Automation, so a rating set that way never reached the app. `WinUiCx::observe` registers a dependency-property callback instead: it sees every change, and it runs synchronously, so the backend's own prop updates are muted (events raised asynchronously, like `PipsPager`'s `SelectedIndexChanged` after creation, slip past muting).
+- **Drawn widgets are XAML shapes built from markup.** The display list becomes a canvas of `Path`s loaded with `XamlReader`. Semantic colors become `{ThemeResource …}` brushes (`TextFillColorPrimaryBrush`, `AccentFillColorDefaultBrush`, …), so they follow the element's theme live. Every shape is a path, so strokes are centred on the outline as on the other platforms. Pointer presses and releases on the canvas become `Pointer` events; `SyntheticInput::Click` emits them directly.
+- **Native views' accessibility actions** go through the control's UIA patterns: Invoke or Toggle for Activate, RangeValue for Increment/Decrement, Value (or RangeValue) for SetValue.
+- **WinUI's controls in the example:** `PipsPager` is WinUI's own, and so is `RatingControl`, so the rating is native on Windows as well as on macOS. WinUI has no lock button, so the lock is composed there.
+
+## 17. Implementation notes (M0.5 WinUI spike)
+
+The spike lives in `spikes/winui` and is not a workspace member. It builds a small UI and checks each operation the backend will need:
+
+- It creates a window, a `Canvas` host, a `Button` and a wrapping `TextBlock`, and places them at our frames.
+- It measures them, clicks through UI Automation, and captures the root to a PNG.
+
+What it established for M3:
+
+- **Bindings.**
+  - `windows-bindgen` 0.100 generates everything from three sources: the `Microsoft.WindowsAppSDK.WinUI` and `.InteractiveExperiences` NuGet metadata, plus the built-in Windows metadata. The output is about 2.3k lines, against reactor's 29k.
+  - `--compose` (needed for `Application`) requires `--minimal`. Filters therefore list members (`IUIElement::{Measure, get_DesiredSize}`), and calls go through `cast::<IUIElement>()` and friends rather than inherited methods.
+  - Struct fields are snake_case (`Size { width, height }`).
+- **Bootstrap.**
+  - Framework-dependent bootstrap works the way reactor does it: `TryCreatePackageDependency` + `AddPackageDependency` on `Microsoft.WindowsAppRuntime.2_8wekyb3d8bbwe`, with a minimum version of 2.4. That resolves to any installed 2.x at or above it (2.5.1 on the dev machine).
+  - The composed `Application` must merge `XamlControlsResources` and forward `IXamlMetadataProvider` to `XamlControlsXamlMetaDataProvider`. Otherwise controls have no templates.
+- **Measure needs the live tree.**
+  - Before insertion, a `Button` measures `0 × 19` because its template isn't applied yet. It still does once inserted, until the window has loaded.
+  - Once the root has loaded, any element appended to a live `Canvas` measures correctly right away, before its own `Loaded`.
+  - So the first render waits for the root's `Loaded`. After that, it's fine to measure right after `Insert`.
+- **Our frame size wins over content.**
+  - `SetFrame` is `Canvas.SetLeft/Top` + `Width`/`Height`, and XAML's `Measure` then returns that explicit size.
+  - The backend's `measure` therefore sets `Width`/`Height` to NaN (Auto), measures, and restores the frame.
+  - With that, measurement after a content or text change is synchronous and correct, with no layout pass in between.
+- **Text.**
+  - Wrapping under a definite width works: at width 120 the label measures `115.3 × 56`.
+  - At width 0 it wraps per character (`0 × 782`). Min-content text needs its own approach, such as measuring the longest word, like on AppKit (§16).
+- **Units.**
+  - Measured values are logical and already snapped to device pixels at the rasterization scale. At 1.5, a width of `77.33` is 116 px.
+  - `AppWindow` sizes (`ResizeClient`) are physical pixels and must be scaled.
+- **Events.**
+  - Handlers are Rust closures (`IButtonBase::Click(|_, _| …)`). The returned `EventRevoker` unsubscribes on drop, so the backend owns the revokers for each node.
+  - `IInvokeProvider::Invoke` on the element's automation peer raises `Click` synchronously. That is what the test driver's `Activate` needs.
+  - `DispatcherQueue::TryEnqueue` is the run-loop flush hook.
+- **Capture.**
+  - `RenderTargetBitmap::RenderAsync(root)` + `GetPixelsAsync` works.
+  - Completions arrive on the UI thread, but `IAsyncAction::when` wants `Send`, so XAML objects travel through a thread-local.
+  - `PrintWindow` yields black, because the content is drawn by composition.
+  - The capture follows the system theme, so tests must force the light theme, as on AppKit.
+- **Shutdown.** All XAML references must be released before `Application::Exit`. Dropping them later, for example from a thread-local destructor, fails fast with `STATUS_STACK_BUFFER_OVERRUN`.
+- **Toolchain.**
+  - windows-rs 0.100 links through `raw-dylib`. On `x86_64-pc-windows-gnu` that needs `dlltool`, which rustc doesn't find (the toolchain ships one under `self-contained/`, but rustc doesn't look there), and `windows-reactor-setup` rejects plain gnu anyway.
+  - The Windows backend therefore targets `x86_64-pc-windows-msvc` (or gnullvm).
+  - Cargo can't require a target per host (`rust-toolchain.toml` pins only the channel, `build.target` applies to every OS, `forced-target` is nightly-only). `mitsuami-winui` pulls its Windows dependencies only for `target_env = "msvc"`, and other Windows toolchains get a `compile_error!` that names the fix: `rustup set default-host x86_64-pc-windows-msvc`, or `cargo +1.96-x86_64-pc-windows-msvc`.
+
+## 18. Implementation notes (M3)
+
+What the WinUI backend (`crates/mitsuami-winui`) does beyond the spike, and why:
+
+- **Bindings are generated once and checked in** (`src/bindings.rs`, about 7k lines), by the tool in `crates/mitsuami-winui/bindgen/` from the member list in its `filter.txt`. The crate needs neither network access nor `windows-bindgen` at build time. They are public as `mitsuami_winui::bindings`, the escape hatch for native access.
+- **No `Application::Start`.** The backend composes the `Application`, then calls `WindowsXamlManager::InitializeForCurrentThread` (in that order: the other order fails), and pumps messages itself. `run()` is a plain `PeekMessage` loop that ticks before `MsgWaitForMultipleObjectsEx` sleeps until the next timer, like AppKit's run-loop observer. Ticks are also scheduled on the `DispatcherQueue`, which keeps running inside modal loops (live resizing) that bypass ours. Tests use the same pump.
+- **Windows are live before anything is measured.** `Create(Window)` activates the window right away, layered and nearly transparent, and waits (pumping) for its content's `Loaded`. The window becomes visible after the first layout. Test windows stay that way: alpha 1 rather than 0, because the compositor skips fully transparent windows and XAML's rendering (captures) stalls. They are click-through and hidden from the taskbar.
+- **XAML reports asynchronously; the core expects prompt reports.** `GotFocus`, `TextChanged`, `ViewChanged`, `SizeChanged` and `Checked` arrive after the call that caused them. The backend reports what it causes itself right away: focus it moves, values it sets for tests, scrolls it applies with `UpdateLayout`, and window sizes it sets. The late XAML event then finds its value already reported and is dropped. Focus moves XAML makes on its own (a focused control is disabled) are picked up when tests pump.
+- **Title bar.** The Win32 caption ignores the app's theme, so windows extend their content into the title bar and host WinUI's `TitleBar` control, with the caption buttons set to follow the theme (`AppWindowTitleBar.PreferredTheme`). The content size then needs care: `ResizeClient` sizes the area below the caption strip while `ClientSize` and XAML's root include it, and Windows keeps a 1 px resize border inside the client area. `resize_client` corrects by what `ClientSize` reports and by the border measured off the live root.
+- **Tab order.** `TabIndex` is scoped to each container, so it can't express a window-wide order across nested hosts. The window root handles Tab in `PreviewKeyDown` and moves along the core's order itself.
+- **Theme resources come from markup.** The window root (menu-bar row, content host, background) is built with `XamlReader::Load`, so `{ThemeResource …}` follows the element's theme (tests force light) and live system theme changes. A brush looked up in code follows the app theme instead.
+- **Completions and threads.** XAML operations (`RenderTargetBitmap`, `ContentDialog`) complete on the UI thread. The WinAppSDK file pickers and the clipboard complete on worker threads, so they hop back through the `DispatcherQueue`. `IAsyncOperation::when` wants `Send` closures, so replies wait in a thread-local.
+- **Test hooks.** XAML reports asynchronously, so the WinUI backend implements `TestHooks::settle` (added for GTK, which needed the same) by pumping messages and picking up focus moves XAML made itself; the test executor calls it while a test awaits native work, such as a capture.
+- **Known gaps.** Min-content text falls back to max-content, as on AppKit. `Destructive` buttons look like `Default`, because Fluent has no destructive style. Self-contained deployment (`windows-reactor-setup`) isn't wired up: apps need the Windows App Runtime 2.4+ installed. Windows have no app icon: the `TitleBar` control shows none, where the Win32 caption showed the executable's.
+
+## 19. Open questions
+
+- **App icon.** An app-level setting (`App::icon(…)`) rather than a `Capability` (§11): every backend can show one, but where and how differ. WinUI shows it in the `TitleBar` (`IconSource`) and on the taskbar (`AppWindow.SetIcon`). AppKit shows it in the Dock, normally from the bundle, with `applicationIconImage` for unbundled apps. GTK takes an icon name, and on Wayland only the `.desktop` file supplies one. Still open: the source format (one PNG set, or per-platform assets) and whether bundling tools (`cargo mitsuami`) own it.
+- The exact Windows floor for Windows App SDK 2.4. The InteractiveExperiences metadata still ships a 10.0.17763 variant, which suggests 1809 holds.
 - Visual baseline storage: git LFS is fine to start with. Revisit when baseline volume grows (3 platforms × variants × stories).

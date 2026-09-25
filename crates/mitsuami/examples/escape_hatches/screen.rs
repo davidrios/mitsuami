@@ -1,6 +1,7 @@
 //! The screen: the same on every platform. Each of its three custom
-//! widgets comes from one platform and is native there; elsewhere it's built
-//! ad hoc from the platform's widgets, drawn or composed. Labels say which.
+//! widgets comes from one platform and is native wherever the platform has
+//! the control; elsewhere it's built ad hoc from the platform's widgets,
+//! drawn or composed. Labels say which.
 
 use mitsuami::prelude::*;
 
@@ -12,8 +13,8 @@ use crate::store::use_review;
 /// What the pager pages through: where each widget comes from.
 pub const NOTES: [&str; 3] = [
     "The lock is GTK's GtkLockButton; elsewhere it's a plain button.",
-    "The rating is macOS's NSLevelIndicator; GTK builds it from star buttons, like GNOME Software; elsewhere it's drawn.",
-    "The pager is WinUI's PipsPager; it's drawn until the WinUI backend can show the real one.",
+    "The rating is macOS's NSLevelIndicator and WinUI's RatingControl; GTK builds it from star buttons, like GNOME Software.",
+    "The pager is WinUI's PipsPager; elsewhere it's drawn.",
 ];
 
 /// "Rating (native)" where the widget is the platform's own control,

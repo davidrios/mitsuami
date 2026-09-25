@@ -7,10 +7,28 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish = false
+# The bindings generator and its NuGet cache stay out of the package.
+exclude = ["bindgen"]
 
 [dependencies]
 mitsuami-core.workspace = true
+
+# MSVC only: windows-rs links through raw-dylib, which the windows-gnu
+# toolchain can't do out of the box. Other Windows toolchains get a
+# compile_error! with the fix instead (see src/lib.rs).
+[target.'cfg(all(windows, target_env = "msvc"))'.dependencies]
+windows-core.workspace = true
+windows-link.workspace = true
+windows-collections.workspace = true
+windows-future.workspace = true
+windows-reference.workspace = true
+
+[target.'cfg(all(windows, target_env = "msvc"))'.dev-dependencies]
+mitsuami-reactive.workspace = true
+
+[[test]]
+name = "services"
+harness = false
 
 [lints]
 workspace = true

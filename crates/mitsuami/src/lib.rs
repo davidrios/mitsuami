@@ -14,13 +14,14 @@
 //! ```
 //!
 //! The platform backend is chosen by target OS: AppKit on macOS, GTK 4 on
-//! Linux, and WinUI 3 on Windows in M3.
+//! Linux, and WinUI 3 on Windows.
 //!
 //! Escape hatches, for when the shared widgets aren't enough:
 //! - [`platform!`] picks per-platform code (a whole screen, a detail) at
 //!   compile time, while stores and composables stay shared.
 //! - `NativeView` embeds any native view in the shared tree
-//!   (`appkit::NativeView` on macOS, `gtk::NativeView` on Linux).
+//!   (`appkit::NativeView` on macOS, `gtk::NativeView` on Linux,
+//!   `winui::NativeView` on Windows).
 //! - Custom widgets: one [`CustomWidget`](core::CustomWidget) definition,
 //!   rendered natively per platform or drawn with the
 //!   [`Canvas`](core::Canvas) API.
@@ -42,6 +43,11 @@ pub use mitsuami_appkit as appkit;
 /// bindings to write them with (`gtk::gtk`).
 #[cfg(target_os = "linux")]
 pub use mitsuami_gtk as gtk;
+
+/// The WinUI 3 backend: native renders, native views, and the XAML
+/// bindings to write them with (`winui::bindings`, `winui::windows_core`).
+#[cfg(windows)]
+pub use mitsuami_winui as winui;
 
 pub mod prelude {
     pub use crate::{App, platform};

@@ -1,6 +1,7 @@
 //! A star rating, the macOS widget: `NSLevelIndicator` in its rating style
-//! (`macos.rs`). GTK has no rating control, so there it's built ad hoc the
-//! way GNOME Software builds one (`linux.rs`). Elsewhere it's drawn.
+//! (`macos.rs`). WinUI has its own too, `RatingControl` (`windows.rs`). GTK
+//! has no rating control, so there it's built ad hoc the way GNOME Software
+//! builds one (`linux.rs`). Elsewhere it's drawn.
 
 use mitsuami::prelude::*;
 
@@ -8,6 +9,8 @@ use mitsuami::prelude::*;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
 
 pub struct Rating;
 
@@ -102,6 +105,7 @@ impl Render for Rating {
         platform! {
             macos => mitsuami::appkit::native::<Self>().with_drawn(),
             linux => mitsuami::gtk::ad_hoc::<Self>().with_drawn(),
+            windows => mitsuami::winui::native::<Self>().with_drawn(),
             _ => Renderer::drawn(),
         }
     }

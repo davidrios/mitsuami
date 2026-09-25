@@ -1,0 +1,204 @@
+Microsoft.UI.Xaml.Application::{CreateInstance, Current}
+Microsoft.UI.Xaml.IApplication::{get_Resources, get_RequestedTheme}
+Microsoft.UI.Xaml.IApplicationOverrides::{}
+Microsoft.UI.Xaml.LaunchActivatedEventArgs
+Microsoft.UI.Xaml.ApplicationTheme
+Microsoft.UI.Xaml.Controls.XamlControlsResources::CreateInstance
+Microsoft.UI.Xaml.XamlTypeInfo.XamlControlsXamlMetaDataProvider::CreateInstance
+Microsoft.UI.Xaml.Markup.IXamlMetadataProvider
+Microsoft.UI.Xaml.Markup.IXamlType::{}
+Microsoft.UI.Xaml.Markup.XmlnsDefinition
+Windows.UI.Xaml.Interop.TypeName
+Microsoft.UI.Xaml.Hosting.WindowsXamlManager::InitializeForCurrentThread
+Microsoft.UI.Dispatching.DispatcherQueueController::CreateOnCurrentThread
+Microsoft.UI.Dispatching.DispatcherQueue::GetForCurrentThread
+Microsoft.UI.Dispatching.IDispatcherQueue::TryEnqueue
+Microsoft.UI.Dispatching.DispatcherQueueHandler
+
+Microsoft.UI.Xaml.Window::CreateInstance
+Microsoft.UI.Xaml.IWindow::{Activate, Close, get_Content, put_Content, get_Title, put_Title, put_ExtendsContentIntoTitleBar, SetTitleBar}
+Microsoft.UI.Xaml.IWindow2::get_AppWindow
+Microsoft.UI.Windowing.IAppWindow::{get_TitleBar, get_Id, Move, Show, add_Closing, remove_Closing, put_IsShownInSwitchers}
+Microsoft.UI.Windowing.IAppWindow2::{get_ClientSize, ResizeClient}
+Microsoft.UI.Windowing.IAppWindowClosingEventArgs::put_Cancel
+Microsoft.UI.WindowId
+
+Microsoft.UI.Xaml.UIElement::{}
+Microsoft.UI.Xaml.IUIElement::{UpdateLayout, get_FocusState, put_TabIndex, put_IsTabStop, Measure, get_DesiredSize, get_XamlRoot, put_XamlRoot, Focus, put_TabFocusNavigation, get_KeyboardAccelerators, add_GotFocus, remove_GotFocus, add_LostFocus, remove_LostFocus, add_KeyDown, remove_KeyDown, add_PreviewKeyDown, remove_PreviewKeyDown, add_PointerPressed, remove_PointerPressed, add_PointerReleased, remove_PointerReleased}
+Microsoft.UI.Xaml.IFrameworkElement::{get_Width, put_Width, get_Height, put_Height, put_RequestedTheme, put_Style, get_ActualWidth, get_ActualHeight, put_MinWidth, add_SizeChanged, remove_SizeChanged, add_Loaded, remove_Loaded, get_IsLoaded}
+Microsoft.UI.Xaml.ISizeChangedEventArgs::get_NewSize
+Microsoft.UI.Xaml.IRoutedEventArgs::get_OriginalSource
+Microsoft.UI.Xaml.RoutedEventHandler
+Microsoft.UI.Xaml.SizeChangedEventHandler
+Microsoft.UI.Xaml.ElementTheme
+Microsoft.UI.Xaml.FocusState
+Microsoft.UI.Xaml.TextWrapping
+Microsoft.UI.Xaml.Style
+Microsoft.UI.Xaml.IXamlRoot::get_RasterizationScale
+Microsoft.UI.Xaml.IResourceDictionary::get_MergedDictionaries
+Microsoft.UI.Xaml.Input.KeyboardNavigationMode
+Microsoft.UI.Xaml.Input.KeyEventHandler
+Microsoft.UI.Xaml.Input.IKeyRoutedEventArgs::{get_Key, put_Handled}
+Microsoft.UI.Xaml.Input.KeyboardAccelerator::CreateInstance
+Microsoft.UI.Xaml.Input.IKeyboardAccelerator::{get_Key, put_Key, get_Modifiers, put_Modifiers}
+Microsoft.UI.Xaml.Media.VisualTreeHelper::{GetParent, GetChildrenCount, GetChild, GetOpenPopupsForXamlRoot}
+Microsoft.UI.Xaml.Controls.Primitives.IPopup::get_Child
+Microsoft.UI.Xaml.Controls.Primitives.Popup::{}
+Microsoft.UI.Xaml.Media.SolidColorBrush::CreateInstanceWithColor
+Microsoft.UI.Xaml.Media.Brush::{}
+Windows.UI.Color
+
+Microsoft.UI.Xaml.Controls.Grid::SetRow
+Microsoft.UI.Xaml.Controls.Canvas::{CreateInstance, SetLeft, SetTop, GetLeft, GetTop}
+Microsoft.UI.Xaml.Controls.IPanel::{get_Children, put_Background}
+Microsoft.UI.Xaml.Controls.UIElementCollection::{}
+Microsoft.UI.Xaml.Controls.TextBlock::CreateInstance
+Microsoft.UI.Xaml.Controls.ITextBlock::{get_Text, put_Text, put_TextWrapping, put_FontSize, put_FontWeight, put_FontFamily}
+Microsoft.UI.Xaml.Media.FontFamily::CreateInstanceWithName
+Windows.UI.Text.FontWeight
+Microsoft.UI.Xaml.Controls.IControl::{get_IsEnabled, put_IsEnabled, put_FontSize, put_FontWeight, put_FontFamily, put_Background, put_BorderThickness}
+Microsoft.UI.Xaml.Thickness
+Microsoft.UI.Xaml.Controls.IContentControl::{get_Content, put_Content}
+Microsoft.UI.Xaml.Controls.Button::CreateInstance
+Microsoft.UI.Xaml.Controls.Primitives.IButtonBase::{add_Click, remove_Click}
+Microsoft.UI.Xaml.Controls.CheckBox::CreateInstance
+Microsoft.UI.Xaml.Controls.Primitives.IToggleButton::{get_IsChecked, put_IsChecked, add_Checked, remove_Checked, add_Unchecked, remove_Unchecked}
+Microsoft.UI.Xaml.Controls.ToggleSwitch::CreateInstance
+Microsoft.UI.Xaml.Controls.IToggleSwitch::{get_IsOn, put_IsOn, add_Toggled, remove_Toggled}
+Microsoft.UI.Xaml.Controls.TextBox::CreateInstance
+Microsoft.UI.Xaml.Controls.ITextBox::{get_Text, put_Text, get_PlaceholderText, put_PlaceholderText, get_SelectionStart, put_SelectionStart, get_SelectionLength, put_SelectionLength, get_SelectedText, put_SelectedText, add_TextChanged, remove_TextChanged}
+Microsoft.UI.Xaml.Controls.TextChangedEventHandler
+Microsoft.UI.Xaml.Controls.ScrollViewer::CreateInstance
+Microsoft.UI.Xaml.Controls.IScrollViewer::{get_HorizontalOffset, get_VerticalOffset, get_ScrollableWidth, get_ScrollableHeight, get_HorizontalScrollBarVisibility, put_HorizontalScrollBarVisibility, get_VerticalScrollBarVisibility, put_VerticalScrollBarVisibility, put_HorizontalScrollMode, put_VerticalScrollMode, ChangeViewWithOptionalAnimation, add_ViewChanged, remove_ViewChanged}
+Microsoft.UI.Xaml.Controls.ScrollBarVisibility
+Microsoft.UI.Xaml.Controls.ScrollMode
+
+Microsoft.UI.Xaml.Automation.AutomationProperties::{SetName, SetHelpText, SetAccessibilityView}
+Microsoft.UI.Xaml.Automation.Peers.AccessibilityView
+Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer::CreatePeerForElement
+Microsoft.UI.Xaml.Automation.Peers.IAutomationPeer::GetPattern
+Microsoft.UI.Xaml.Automation.Peers.PatternInterface
+Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider::Invoke
+Microsoft.UI.Xaml.Automation.Provider.IToggleProvider::Toggle
+Microsoft.UI.Xaml.Automation.Provider.IValueProvider::SetValue
+
+Microsoft.UI.Xaml.Controls.ContentDialog::CreateInstance
+Microsoft.UI.Xaml.Controls.IContentDialog::{put_Title, put_PrimaryButtonText, put_SecondaryButtonText, put_CloseButtonText, put_DefaultButton, ShowAsync}
+Microsoft.UI.Xaml.Controls.ContentDialogResult
+Microsoft.UI.Xaml.Controls.ContentDialogButton
+Microsoft.UI.Xaml.Controls.MenuBar::CreateInstance
+Microsoft.UI.Xaml.Controls.IMenuBar::get_Items
+Microsoft.UI.Xaml.Controls.MenuBarItem::CreateInstance
+Microsoft.UI.Xaml.Controls.IMenuBarItem::{get_Title, put_Title, get_Items}
+Microsoft.UI.Xaml.Controls.MenuFlyoutItem::CreateInstance
+Microsoft.UI.Xaml.Controls.IMenuFlyoutItem::{put_Text, add_Click, remove_Click}
+Microsoft.UI.Xaml.Controls.MenuFlyoutSeparator::CreateInstance
+Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase::{}
+Windows.System.VirtualKey
+Windows.System.VirtualKeyModifiers
+
+Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap::CreateInstance
+Microsoft.UI.Xaml.Media.Imaging.IRenderTargetBitmap::{RenderAsync, GetPixelsAsync, get_PixelWidth, get_PixelHeight}
+Windows.Storage.Streams.DataReader::FromBuffer
+Windows.Storage.Streams.IDataReader::ReadBytes
+Windows.Storage.Streams.IBuffer::get_Length
+
+Windows.ApplicationModel.DataTransfer.Clipboard::{GetContent, SetContent, Flush}
+Windows.ApplicationModel.DataTransfer.DataPackage::CreateInstance
+Windows.ApplicationModel.DataTransfer.IDataPackage::SetText
+Windows.ApplicationModel.DataTransfer.IDataPackageView::{Contains, GetTextAsync}
+Windows.ApplicationModel.DataTransfer.StandardDataFormats::get_Text
+
+Microsoft.Windows.Storage.Pickers.IFileOpenPickerFactory::CreateInstance
+Microsoft.Windows.Storage.Pickers.IFileOpenPicker::{get_FileTypeFilter, PickSingleFileAsync, PickMultipleFilesAsync}
+Microsoft.Windows.Storage.Pickers.IFileSavePickerFactory::CreateInstance
+Microsoft.Windows.Storage.Pickers.IFileSavePicker::{get_FileTypeChoices, put_SuggestedFileName, PickSaveFileAsync}
+Microsoft.Windows.Storage.Pickers.IFolderPickerFactory::CreateInstance
+Microsoft.Windows.Storage.Pickers.IFolderPicker::PickSingleFolderAsync
+Microsoft.Windows.Storage.Pickers.IPickFileResult::get_Path
+Microsoft.Windows.Storage.Pickers.IPickFolderResult::get_Path
+
+Windows.UI.ViewManagement.UISettings::CreateInstance
+Windows.UI.ViewManagement.IUISettings::get_AnimationsEnabled
+Windows.UI.ViewManagement.IUISettings2::get_TextScaleFactor
+Windows.UI.ViewManagement.AccessibilitySettings::CreateInstance
+Windows.UI.ViewManagement.IAccessibilitySettings::get_HighContrast
+
+Windows.Foundation.PropertyValue::{CreateString, CreateDouble, CreateBoolean}
+Windows.Foundation.IPropertyValue::{GetString, GetBoolean}
+Windows.Foundation.Size
+
+Windows.Win32.AddPackageDependency
+Windows.Win32.TryCreatePackageDependency
+Windows.Win32.PACKAGE_VERSION
+Windows.Win32.PackageDependencyProcessorArchitectures
+Windows.Win32.STATEREPOSITORY_E_DEPENDENCY_NOT_RESOLVED
+Windows.Win32.GetProcessHeap
+Windows.Win32.HeapFree
+Windows.Win32.CoInitializeEx
+Windows.Win32.COINIT_APARTMENTTHREADED
+Windows.Win32.RPC_E_CHANGED_MODE
+Windows.Win32.SetProcessDpiAwarenessContext
+Windows.Win32.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+Windows.Win32.GetDpiForWindow
+Windows.Win32.PeekMessageW
+Windows.Win32.TranslateMessage
+Windows.Win32.DispatchMessageW
+Windows.Win32.MsgWaitForMultipleObjectsEx
+Windows.Win32.PostThreadMessageW
+Windows.Win32.GetCurrentThreadId
+Windows.Win32.MSG
+Windows.Win32.PM_REMOVE
+Windows.Win32.QS_ALLINPUT
+Windows.Win32.MWMO_INPUTAVAILABLE
+Windows.Win32.WM_NULL
+Windows.Win32.INFINITE
+Windows.Win32.GetWindowLongW
+Windows.Win32.SetWindowLongW
+Windows.Win32.GWL_EXSTYLE
+Windows.Win32.WS_EX_LAYERED
+Windows.Win32.SetLayeredWindowAttributes
+Windows.Win32.LWA_ALPHA
+Windows.Win32.SetForegroundWindow
+Windows.Win32.E_FAIL
+Windows.Win32.MessageBoxW
+Windows.Win32.MB_ICONERROR
+Windows.Win32.GetDpiForSystem
+Windows.Win32.GetKeyState
+Windows.Win32.VK_SHIFT
+Microsoft.UI.Xaml.Automation.AutomationProperties::GetName
+Windows.Win32.WS_EX_TRANSPARENT
+Microsoft.UI.Xaml.Markup.XamlReader::Load
+Windows.Win32.EnumWindows
+Windows.Win32.GetWindowThreadProcessId
+Windows.Win32.GetClassNameW
+Windows.Win32.PostMessageW
+Windows.Win32.WM_CLOSE
+Windows.Win32.GetCurrentProcessId
+Windows.Win32.IsWindowVisible
+Windows.Win32.GetWindowTextW
+Microsoft.UI.Windowing.IAppWindowTitleBar2::put_PreferredHeightOption
+Microsoft.UI.Windowing.IAppWindowTitleBar3::put_PreferredTheme
+Microsoft.UI.Windowing.TitleBarTheme
+Microsoft.UI.Windowing.TitleBarHeightOption
+Microsoft.UI.Xaml.Controls.TitleBar::{}
+Microsoft.UI.Xaml.Controls.ITitleBar::{get_Title, put_Title}
+Microsoft.UI.Xaml.Input.PointerEventHandler
+Microsoft.UI.Xaml.Input.IPointerRoutedEventArgs::GetCurrentPoint
+Microsoft.UI.Input.IPointerPoint::get_Position
+Windows.Foundation.Point
+Microsoft.UI.Xaml.Automation.Provider.IRangeValueProvider::{SetValue, get_Value, get_SmallChange, get_Minimum, get_Maximum}
+Microsoft.UI.Xaml.Controls.RatingControl::CreateInstance
+Microsoft.UI.Xaml.Controls.IRatingControl::{get_Value, put_Value, get_MaxRating, put_MaxRating, get_IsReadOnly, put_IsReadOnly, put_IsClearEnabled, add_ValueChanged, remove_ValueChanged}
+Microsoft.UI.Xaml.Controls.PipsPager::CreateInstance
+Microsoft.UI.Xaml.Controls.IPipsPager::{get_NumberOfPages, put_NumberOfPages, get_SelectedPageIndex, put_SelectedPageIndex, add_SelectedIndexChanged, remove_SelectedIndexChanged}
+Microsoft.UI.Xaml.Controls.Slider::CreateInstance
+Microsoft.UI.Xaml.Controls.Primitives.IRangeBase::{get_Value, put_Value, get_Minimum, put_Minimum, get_Maximum, put_Maximum, get_SmallChange, put_SmallChange, add_ValueChanged, remove_ValueChanged}
+Microsoft.UI.Xaml.Controls.Border::CreateInstance
+Microsoft.UI.Xaml.Controls.IBorder::{get_Child, put_Child}
+Microsoft.UI.Xaml.IDependencyObject::RegisterPropertyChangedCallback
+Microsoft.UI.Xaml.DependencyPropertyChangedCallback
+Microsoft.UI.Xaml.DependencyProperty::{}
+Microsoft.UI.Xaml.Controls.RatingControl::ValueProperty
+Microsoft.UI.Xaml.Controls.PipsPager::SelectedPageIndexProperty
+Microsoft.UI.Xaml.Controls.Primitives.RangeBase::ValueProperty

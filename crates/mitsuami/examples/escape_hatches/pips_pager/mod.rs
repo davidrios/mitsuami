@@ -1,13 +1,11 @@
 //! A pips pager, the WinUI widget: a row of dots, one per page, the current
-//! one larger (WinUI's `PipsPager`). Neither AppKit nor GTK has one, so
-//! elsewhere it's drawn; so is it on Windows, until the WinUI backend (M3)
-//! can render the real one:
-//!
-//! ```ignore
-//! windows => mitsuami::winui::native::<Self>().with_drawn(),
-//! ```
+//! one larger. On Windows it's WinUI's own `PipsPager` (`windows.rs`).
+//! Neither AppKit nor GTK has one, so elsewhere it's drawn.
 
 use mitsuami::prelude::*;
+
+#[cfg(windows)]
+mod windows;
 
 pub struct PipsPager;
 
@@ -74,6 +72,9 @@ impl Drawn for PipsPager {
 
 impl Render for PipsPager {
     fn renderer() -> Renderer<Self> {
-        Renderer::drawn()
+        platform! {
+            windows => mitsuami::winui::native::<Self>().with_drawn(),
+            _ => Renderer::drawn(),
+        }
     }
 }

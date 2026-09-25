@@ -107,15 +107,31 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
     (Ui::new(backend), Box::new(hooks))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Test windows are alive but invisible (and click-through) unless
+/// MITSUAMI_SHOW_WINDOWS=1: XAML only lays out and renders live windows.
+#[cfg(windows)]
+fn native() -> (Ui, Box<dyn TestHooks>) {
+    use mitsuami_winui::{BackendOptions, WinUiBackend};
+    mitsuami_winui::init_for_tests();
+    let backend = WinUiBackend::new(BackendOptions {
+        show_windows: show_windows(),
+        record_commands: true,
+        force_light_theme: true,
+        private_clipboard: true,
+    });
+    let hooks = backend.handle();
+    (Ui::new(backend), Box::new(hooks))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn native() -> (Ui, Box<dyn TestHooks>) {
     let _ = show_windows;
-    panic!("mitsuami-test: no native backend for this platform yet (WinUI arrives in M3)")
+    panic!("mitsuami-test: no native backend for this platform")
 }
 
 /// Whether this platform has a native backend to run `--native` tests on.
 pub(crate) fn native_available() -> bool {
-    cfg!(any(target_os = "macos", target_os = "linux"))
+    cfg!(any(target_os = "macos", target_os = "linux", windows))
 }
 
 /// Runs `f` inside an autorelease pool where the platform needs one, so

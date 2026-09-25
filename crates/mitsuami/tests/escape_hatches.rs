@@ -3,7 +3,7 @@
 
 #[path = "../examples/escape_hatches/lock/mod.rs"]
 mod lock;
-#[path = "../examples/escape_hatches/pips_pager.rs"]
+#[path = "../examples/escape_hatches/pips_pager/mod.rs"]
 mod pips_pager;
 #[path = "../examples/escape_hatches/rating/mod.rs"]
 mod rating;
@@ -253,8 +253,11 @@ async fn composed_widgets_are_built_from_builtin_widgets(app: TestApp) {
 
 // ------------------------------------------------------------ pips pager
 
+/// Drawn everywhere: `click_at` is for drawn widgets, and the pager is
+/// native on Windows.
 fn pager(page: Signal<u8>) -> mitsuami::core::Custom<PipsPager> {
     PipsPager::view(move || PipsPagerProps { count: 4, selected: page.get() })
+        .drawn()
         .a11y_label("Page")
         .on_event(move |PipsPagerEvent::Selected(p)| page.set(*p))
 }
@@ -295,11 +298,11 @@ async fn each_platform_has_its_own_widget_native(app: TestApp) {
         macos => &["Rating (native)"],
         // The rating is built ad hoc there: not labelled native.
         linux => &["Lock (native)"],
-        // The pager, once the WinUI backend (M3) renders it.
+        windows => &["Rating (native)", "Page (native)"],
         _ => &[],
     };
     assert_eq!(native, expected);
-    assert!(app.get_by_text("Rating").exists() || cfg!(target_os = "macos"));
+    assert!(app.get_by_text("Rating").exists() || cfg!(any(target_os = "macos", windows)));
 }
 
 #[mitsuami_test::test]
@@ -463,6 +466,94 @@ mod native_views {
         }
         // Accessibility increments step the spin button; its signal comes
         // back as an event the view handles.
+        app.get_by_label("Stars").increment().await;
+        app.get_by_label("Stars").increment().await;
+        assert_eq!(stars.get_untracked(), 2);
+        app.get_by_label("Stars").decrement().await;
+        assert_eq!(stars.get_untracked(), 1);
+    }
+}
+
+#[cfg(windows)]
+mod native_views {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use mitsuami::core::{Prop, WidgetKind};
+    use mitsuami::prelude::*;
+    use mitsuami::winui::NativeView;
+    use mitsuami::winui::bindings::{Button, IContentControl, IPropertyValue, IRangeBase, PropertyValue, Slider};
+    use mitsuami::winui::windows_core::Interface;
+    use mitsuami_test::prelude::*;
+
+    fn label(button: &Button) -> Option<String> {
+        let content = button.cast::<IContentControl>().ok()?.Content().ok()?;
+        content.cast::<IPropertyValue>().ok()?.GetString().ok()
+    }
+
+    #[mitsuami_test::test]
+    async fn native_views_are_created_measured_and_updated(app: TestApp) {
+        let title = signal("First".to_string());
+        let button: Rc<RefCell<Option<Button>>> = Rc::default();
+        let created = button.clone();
+        app.mount(move || {
+            Row::new().child(
+                NativeView::xaml(move |_| {
+                    let button = Button::new()?;
+                    *created.borrow_mut() = Some(button.clone());
+                    Ok(button)
+                })
+                .measure(|_, _| Size::new(120.0, 30.0))
+                .update(title, |button, title| {
+                    button.cast::<IContentControl>()?.SetContent(&PropertyValue::CreateString(title)?)
+                })
+                .a11y_label("Raw button"),
+            )
+        });
+        let node = app.get_by_label("Raw button");
+        assert_eq!(node.native_state().kind, WidgetKind::Native);
+        assert!(node.native_state().props.iter().any(|p| matches!(p, Prop::Native(_))));
+        if app.is_headless() {
+            // No native view to create: an empty box.
+            assert!(button.borrow().is_none());
+            return;
+        }
+        assert_eq!(node.frame().size, Size::new(120.0, 30.0));
+        let button = button.borrow().clone().expect("created natively");
+        assert_eq!(label(&button).as_deref(), Some("First"));
+        title.set("Second".into());
+        app.settle().await;
+        assert_eq!(label(&button).as_deref(), Some("Second"));
+    }
+
+    #[mitsuami_test::test]
+    async fn native_views_report_their_events(app: TestApp) {
+        let stars = signal(0u8);
+        app.mount(move || {
+            NativeView::xaml(|cx| {
+                let slider = Slider::new()?;
+                let range: IRangeBase = slider.cast()?;
+                range.SetMaximum(5.0)?;
+                range.SetSmallChange(1.0)?;
+                let emitter = cx.emitter();
+                cx.keep(range.ValueChanged(move |sender, _| {
+                    let value = sender.as_ref().and_then(|s| s.cast::<IRangeBase>().ok()?.Value().ok());
+                    if let Some(value) = value {
+                        emitter.emit(value.round() as u8);
+                    }
+                })?);
+                Ok(slider)
+            })
+            // Setting the value from the app is not an event.
+            .update(stars, |slider, stars| slider.cast::<IRangeBase>()?.SetValue(*stars as f64))
+            .on_event(move |value: &u8| stars.set(*value))
+            .a11y_label("Stars")
+        });
+        if app.is_headless() {
+            return;
+        }
+        // Accessibility increments go to the slider's RangeValue pattern;
+        // its ValueChanged comes back as an event the view handles.
         app.get_by_label("Stars").increment().await;
         app.get_by_label("Stars").increment().await;
         assert_eq!(stars.get_untracked(), 2);

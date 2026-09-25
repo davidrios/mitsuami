@@ -4,14 +4,18 @@ Native, declarative, cross-platform UI for Rust: AppKit on macOS, WinUI 3 on
 Windows, GTK 4 on Linux, driven by one Vue-inspired layer with CSS-style
 flexbox/grid layout.
 
-Status: **M1, M2 and M4 done**. The AppKit and GTK 4 backends run real
-apps on macOS and Linux, and the same tests pass headlessly and against
-native AppKit and GTK widgets. The escape hatches work on both: `platform!`
-for per-platform code, `NativeView` for any `NSView` or GTK widget, and
-custom widgets that are native where the platform has the control, and
-built ad hoc from the platform's widgets, drawn or composed where it doesn't. WinUI 3 comes next;
-writing a backend starts with [`docs/BACKENDS.md`](docs/BACKENDS.md). The design is in
+Status: **M1 to M4 done**. The AppKit, GTK 4 and WinUI 3 backends run real
+apps on macOS, Linux and Windows, and the same tests pass headlessly and
+against the native widgets of all three. The escape hatches work on each:
+`platform!` for per-platform code, `NativeView` for any `NSView`, GTK widget
+or XAML element, and custom widgets that are native where the platform has
+the control, and built ad hoc from the platform's widgets, drawn or composed
+where it doesn't. Writing a backend starts with
+[`docs/BACKENDS.md`](docs/BACKENDS.md). The design is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+On Windows, mitsuami needs the Windows App Runtime 2.4 or later installed,
+and builds with the MSVC toolchain.
 
 ```rust
 use mitsuami::prelude::*;
@@ -37,7 +41,7 @@ fn counter(initial: i32) -> impl View {
 | `mitsuami-test` | Test runner, a11y queries, actions, assertions, snapshots |
 | `mitsuami-appkit` | AppKit backend (macOS) |
 | `mitsuami-gtk` | GTK 4 backend (Linux) |
-| `mitsuami-winui` | WinUI 3 backend (placeholder until M3) |
+| `mitsuami-winui` | WinUI 3 backend (Windows) |
 
 ## Testing
 

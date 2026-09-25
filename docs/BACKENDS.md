@@ -62,7 +62,7 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 
 ### Widget kinds
 
-| Kind | AppKit (done) | GTK 4 (done) | WinUI 3 (suggested) |
+| Kind | AppKit (done) | GTK 4 (done) | WinUI 3 (done) |
 |---|---|---|---|
 | `Window` | `NSWindow` + flipped content host | `gtk::Window` + `HeaderBar` + host as child (done) | `Window` + `Canvas` as `Content` |
 | `Container` (layout host) | flipped `NSView` subclass | `gtk::Widget` subclass that allocates children at given frames (or `gtk::Fixed`) | `Canvas` (`Canvas.Left/Top`, `Width/Height`) |
@@ -112,7 +112,7 @@ Native callbacks **only** call `events.emit(id, event)` on the `EventSink` given
 | `Pointer(event)` | primary button down / up on a **drawn** custom widget, in its coordinates | |
 | `Custom(value)` | a native render or native view emits (through your `Emitter`) | |
 
-Focus tracking needs one global observer, not per-widget guesses. Examples: AppKit uses KVO on `NSWindow.firstResponder`, GTK can use `notify::focus-widget` on the window, and WinUI can use `FocusManager.GotFocus`/`LostFocus`. Map the focused native object to the nearest known node by walking up its parents. Composite widgets (a text field's inner editor, a scrolled window's viewport) put focus on children you didn't create.
+Focus tracking needs one global observer, not per-widget guesses. Examples: AppKit uses KVO on `NSWindow.firstResponder`, GTK can use `notify::focus-widget` on the window, and WinUI uses a bubbling `GotFocus` on the window's root. WinUI raises it asynchronously, so its backend also reports the focus moves it makes itself right away, and drops the late event. Map the focused native object to the nearest known node by walking up its parents. Composite widgets (a text field's inner editor, a scrolled window's viewport) put focus on children you didn't create.
 
 ## 5. Measuring
 
@@ -125,7 +125,7 @@ Focus tracking needs one global observer, not per-widget guesses. Examples: AppK
 
 Platform hints:
 - **GTK:** `widget.measure(Orientation, for_size)` gives the minimum and natural sizes. Use natural for max-content and minimum for min-content.
-- **WinUI:** `element.Measure(available)` then `DesiredSize`. Check early (the spike) whether elements must be in the live tree to measure.
+- **WinUI:** `element.Measure(available)` then `DesiredSize`. Elements must be in a live tree: before that, a `Button` measures `0 × 19`. The frame's `Width`/`Height` must be lifted to Auto (NaN) for the call, because `Measure` returns an explicit size.
 
 Known gap on AppKit: min-content falls back to max-content. If your platform gives min-content cheaply (GTK does), implement it properly.
 
@@ -180,7 +180,7 @@ Implement `Services`. **Never block**: reply later, from the platform's completi
 
 ## 8a. Escape hatches: custom widgets and native views
 
-The core does the shared work; a backend supplies three things. AppKit's are in `mitsuami-appkit/src/custom.rs`, GTK's in `mitsuami-gtk/src/custom.rs`.
+The core does the shared work; a backend supplies three things. AppKit's are in `mitsuami-appkit/src/custom.rs`, GTK's in `mitsuami-gtk/src/custom.rs`, WinUI's in `mitsuami-winui/src/custom.rs`. If your controls may size themselves or skip change events for some sources, see ARCHITECTURE.md §16, "M4 on WinUI".
 
 1. **A `NativeRender` trait** for custom widgets, in your crate, shaped like AppKit's: `type View`, `create(props, cx)`, `update(view, old, new)`, and optional `measure`, `read` (read the props back from the widget, for the mirror check) and `perform`. Provide `native::<W>() -> Renderer<W>`: wrap a type-erased render in an `Opaque` and pass it to `Renderer::native`. On `Create` of `Custom(_)`, `find_prop!(props, Custom)`: if `custom.native()` is `Some`, downcast it to your render and create the view; otherwise the widget is drawn.
 2. **A drawn view** that rasterizes `DisplayList`s (fill and stroke of rects, rounded rects, ellipses and paths) with the platform's 2D API. Resolve the semantic `Color`s at draw time, so they follow the appearance. Report primary-button `Pointer` down/up in the widget's coordinates, and support `SyntheticInput::Click`. Don't measure drawn widgets (the core does); `native_state` reports `Custom` and `Drawing` as last received.
@@ -197,7 +197,7 @@ Also:
 
 - **AppKit:** turn off `autorecalculatesKeyViewLoop` and link `nextKeyView` into a loop.
 - **GTK 4:** there is no "next widget" pointer. The window's content host overrides the `focus` vfunc: for Tab and Shift+Tab it `grab_focus`es the next widget in the order that accepts focus, wrapping around; other directions keep GTK's behaviour.
-- **WinUI:** set `TabIndex` to each control's position in the order. Make sure one focus scope covers the window (check `TabFocusNavigation` on the hosts).
+- **WinUI:** `TabIndex` is scoped to each container, so it can't express a window-wide order across nested hosts. Handle Tab in `PreviewKeyDown` on the window's root and focus the next control in the order yourself, as on GTK.
 
 The conformance tests use three controls arranged so that reading order and position on screen disagree (RTL rows, absolute positioning, `tab_index`). An order based on position fails them, as it should.
 
@@ -214,12 +214,12 @@ The conformance tests use three controls arranged so that reading order and posi
 
 Platform hints:
 
-| Step | AppKit (done) | GTK 4 | WinUI 3 |
+| Step | AppKit (done) | GTK 4 | WinUI 3 (done) |
 |---|---|---|---|
-| tick before sleeping | `CFRunLoopObserver` (BeforeWaiting, common modes) | an idle source that is re-added when scheduled (`glib::idle_add_local_once`), guarded by a "scheduled" flag | `DispatcherQueue.TryEnqueue`, guarded the same way |
-| thread-safe wake | `CFRunLoopWakeUp` | `glib::MainContext::default().invoke(...)` to schedule the tick | `DispatcherQueue.TryEnqueue` (thread-safe) |
-| timer | one `CFRunLoopTimer`, re-armed | a `glib::timeout_add_local_once` replaced on re-arm | `DispatcherQueueTimer` |
-| stop | `stop:` **plus an empty posted event** (otherwise it waits for the next real event) | `app.quit()` | `Application.Exit()` / close the last window |
+| tick before sleeping | `CFRunLoopObserver` (BeforeWaiting, common modes) | an idle source that is re-added when scheduled (`glib::idle_add_local_once`), guarded by a "scheduled" flag | our own `PeekMessage` loop (no `Application::Start`) ticks before it sleeps; ticks are also scheduled with `DispatcherQueue.TryEnqueue`, which runs inside modal loops (live resizing) |
+| thread-safe wake | `CFRunLoopWakeUp` | `glib::MainContext::default().invoke(...)` to schedule the tick | `PostThreadMessageW(WM_NULL)` to the UI thread |
+| timer | one `CFRunLoopTimer`, re-armed | a `glib::timeout_add_local_once` replaced on re-arm | the timeout of `MsgWaitForMultipleObjectsEx` |
+| stop | `stop:` **plus an empty posted event** (otherwise it waits for the next real event) | `app.quit()` | leave the loop, then release XAML objects while XAML still runs |
 
 Never call `tick()` from inside a widget callback; the loop calls it.
 
@@ -253,6 +253,8 @@ cargo run -p mitsuami --example showcase        # look at it
 ```
 
 - **`tests/conformance.rs` is the contract.** Get it green first; the other suites mostly follow.
+- **Platforms that report asynchronously** implement `TestHooks::pump`: tests call it while settling, and while a test awaits native work (a capture). WinUI needs it. Report what your backend causes itself right away, rather than waiting for the platform's event, so settles stay deterministic.
+- **On Windows**, build with the MSVC toolchain: `cargo +1.96-x86_64-pc-windows-msvc test` if your default host is gnu.
 - **Mirror checks** run after every settle, comparing native and core children, props, frames, focus and scroll offsets. A failure names the node and the difference.
 - **Visual baselines** are stored per backend in `tests/visual/<name>/`. The first run creates them; look at them.
 - **Headless-only tests** (fake metrics, simulated system changes) are skipped in native runs.
@@ -268,6 +270,6 @@ cargo run -p mitsuami --example showcase        # look at it
 6. `run()` with tick, waker and timer → `run_loop_smoke` exits by itself; the showcase works.
 7. Services + native services checks.
 8. `capture` + visual baselines.
-9. The drawn view, then `NativeRender` and `NativeView` (§8a) → the `escape_hatches` suite passes. The example has one widget from each platform (rating: AppKit, lock: GTK, pips pager: WinUI). Add the native render for yours (`examples/escape_hatches/<widget>/<os>.rs`, WinUI: `PipsPager`) and name it in the widget's `Render` impl with `native::<W>()`. For the others, prefer an ad hoc render built the way your platform's apps build that widget (`ad_hoc::<W>()`) over the drawn one; only a real platform control counts as native.
+9. The drawn view, then `NativeRender` and `NativeView` (§8a) → the `escape_hatches` suite passes. The example has one widget from each platform (rating: AppKit, lock: GTK, pips pager: WinUI). Add the native render for yours (`examples/escape_hatches/<widget>/<os>.rs`), and for any other of the three your platform has as a real control (WinUI has a rating control too), and name it in the widget's `Render` impl with `native::<W>()`. For the others, prefer an ad hoc render built the way your platform's apps build that widget (`ad_hoc::<W>()`) over the drawn one; only a real platform control counts as native.
 
 When something in the contract doesn't fit your platform, **change the contract rather than working around it**, and update the other backends and this guide. Capture and the clipboard became async for exactly this reason.

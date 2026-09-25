@@ -24,5 +24,8 @@ objc2.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 mitsuami-gtk.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+mitsuami-winui.workspace = true
+
 [lints]
 workspace = true

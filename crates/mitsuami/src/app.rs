@@ -52,10 +52,12 @@ impl App {
         mitsuami_appkit::run(setup);
         #[cfg(target_os = "linux")]
         mitsuami_gtk::run(setup);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(windows)]
+        mitsuami_winui::run(setup);
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         {
             let _ = setup;
-            panic!("mitsuami: no native backend for this platform yet (WinUI arrives in M3)");
+            panic!("mitsuami: no native backend for this platform");
         }
     }
 }

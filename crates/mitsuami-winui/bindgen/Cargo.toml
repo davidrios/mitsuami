@@ -1,0 +1,14 @@
+# Regenerates crates/mitsuami-winui/src/bindings.rs from the Windows App SDK
+# metadata. Not a workspace member; run it by hand after changing filter.txt:
+#
+#     cargo run --manifest-path crates/mitsuami-winui/bindgen/Cargo.toml
+[package]
+name = "mitsuami-winui-bindgen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+windows-bindgen = "0.100"

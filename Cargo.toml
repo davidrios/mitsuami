@@ -20,6 +20,7 @@ mitsuami-test = { path = "crates/mitsuami-test" }
 mitsuami-test-macros = { path = "crates/mitsuami-test-macros" }
 mitsuami-appkit = { path = "crates/mitsuami-appkit" }
 mitsuami-gtk = { path = "crates/mitsuami-gtk" }
+mitsuami-winui = { path = "crates/mitsuami-winui" }
 
 slotmap = "1.1"
 taffy = "0.14"
@@ -40,6 +41,12 @@ block2 = "0.6"
 # GTK 4.10 is the floor (docs/ARCHITECTURE.md §11).
 gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
 libc = "0.2"
+
+windows-core = "0.100"
+windows-link = "0.100"
+windows-collections = "0.100"
+windows-future = "0.100"
+windows-reference = "0.100"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
