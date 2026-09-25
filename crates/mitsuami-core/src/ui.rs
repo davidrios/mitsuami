@@ -17,7 +17,7 @@ use crate::command::{Command, EventValue, UiEvent};
 use crate::custom::CustomProps;
 use crate::geometry::{Point, Rect, Size};
 use crate::services::{Alert, MenuBar, OpenFile, SaveFile, ServiceError, Services, reply_future};
-use crate::style::{Style, TextDirection};
+use crate::style::{Align, Display, FlexDirection, Style, TextDirection};
 use crate::task::{Clock, Executor, Sleep, TaskHandle};
 use crate::units::ResolveContext;
 use crate::widget::{NodeId, Prop, WidgetKind};
@@ -1015,11 +1015,20 @@ impl Inner {
         let body = self.metrics.font_sizes.body;
         for window in self.windows.clone() {
             let viewport = self.nodes[&window].window_size;
-            self.resolve_node(window, body, false, viewport);
+            self.resolve_node(window, body, false, viewport, false);
         }
     }
 
-    fn resolve_node(&mut self, id: NodeId, inherited_font: f32, inherited_rtl: bool, viewport: Size) {
+    /// `in_stretching_column`: the layout parent is a flex column that
+    /// stretches its children across (the default).
+    fn resolve_node(
+        &mut self,
+        id: NodeId,
+        inherited_font: f32,
+        inherited_rtl: bool,
+        viewport: Size,
+        in_stretching_column: bool,
+    ) {
         let node = &self.nodes[&id];
         let font_size = match crate::find_prop!(node.props, TextStyle) {
             Some(style) => self.metrics.font_sizes.get(style),
@@ -1038,6 +1047,15 @@ impl Inner {
                 spacing: &self.metrics.spacing,
             };
             let mut style = node.style.to_taffy(&cx, rtl);
+            // Toggles have a fixed natural size, like CSS replaced elements:
+            // stretched, some platforms draw them centered in the extra
+            // space (`NSSwitch`) and all of them take clicks there.
+            if matches!(node.kind, WidgetKind::Checkbox | WidgetKind::Switch) {
+                style.justify_self.get_or_insert(taffy::AlignSelf::START);
+                if in_stretching_column {
+                    style.align_self.get_or_insert(taffy::AlignSelf::START);
+                }
+            }
             if node.kind == WidgetKind::Window {
                 style.size = taffy::Size {
                     width: taffy::Dimension::length(node.window_size.width),
@@ -1048,8 +1066,18 @@ impl Inner {
                 let _ = self.taffy.set_style(t, style);
             }
         }
+        // Nodes without a layout box pass their parent's context through.
+        let in_stretching_column = match node.taffy {
+            Some(_) => {
+                let s = &node.style;
+                s.display == Display::Flex
+                    && matches!(s.flex_direction, FlexDirection::Column | FlexDirection::ColumnReverse)
+                    && matches!(s.align_items, None | Some(Align::Stretch))
+            }
+            None => in_stretching_column,
+        };
         for child in self.nodes[&id].children.clone() {
-            self.resolve_node(child, font_size, rtl, viewport);
+            self.resolve_node(child, font_size, rtl, viewport, in_stretching_column);
         }
     }
 

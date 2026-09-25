@@ -155,6 +155,8 @@ pub struct Style {
 
     pub align_items: Option<Align>,
     pub align_self: Option<Align>,
+    /// Alignment inside a grid cell along the inline axis.
+    pub justify_self: Option<Align>,
     pub align_content: Option<Justify>,
     pub justify_content: Option<Justify>,
     pub row_gap: Length,
@@ -192,6 +194,7 @@ impl Default for Style {
             flex_basis: Length::Auto,
             align_items: None,
             align_self: None,
+            justify_self: None,
             align_content: None,
             justify_content: None,
             row_gap: Length::Px(0.0),
@@ -344,6 +347,7 @@ impl Style {
             flex_basis: dimension(self.flex_basis, cx),
             align_items: self.align_items.map(align_items),
             align_self: self.align_self.map(align_items),
+            justify_self: self.justify_self.map(align_items),
             align_content: self.align_content.map(justify),
             justify_content: self.justify_content.map(justify),
             gap: taffy::Size { width: lp(self.column_gap, cx), height: lp(self.row_gap, cx) },

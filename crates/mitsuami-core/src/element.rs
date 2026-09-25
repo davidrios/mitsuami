@@ -175,6 +175,8 @@ pub trait ElementBuilder: Sized {
         fn shrink(f32) => |s, v| s.flex_shrink = v;
         fn basis(Length) => |s, v| s.flex_basis = v;
         fn align_self(Align) => |s, v| s.align_self = Some(v);
+        /// Alignment inside a grid cell along the inline axis.
+        fn justify_self(Align) => |s, v| s.justify_self = Some(v);
 
         /// Inset from the top of the containing block (with `absolute()`).
         fn top(Length) => |s, v| s.inset.top = v;

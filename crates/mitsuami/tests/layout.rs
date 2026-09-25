@@ -236,3 +236,51 @@ async fn style_with_edits_several_fields_reactively(app: TestApp) {
 }
 
 mitsuami_test::main!();
+
+#[mitsuami_test::test]
+async fn toggles_keep_their_natural_width_in_a_stretched_grid_cell(app: TestApp) {
+    app.mount(|| {
+        Grid::new().width(400).columns([100.px(), 1.fr()]).children((
+            Text::new("Newsletter"),
+            Switch::new("Newsletter").test_id("switch"),
+            Text::new("Terms"),
+            Checkbox::new("Agree").test_id("checkbox"),
+        ))
+    });
+    for id in ["switch", "checkbox"] {
+        let frame = frame_of(&app, id).await;
+        assert_eq!(frame.x(), 100.0, "{id} starts its cell");
+        assert!(frame.width() < 300.0, "{id} is not stretched across its cell: {frame}");
+    }
+}
+
+#[mitsuami_test::test]
+async fn toggles_keep_their_natural_width_in_a_column(app: TestApp) {
+    app.mount(|| {
+        Column::new().width(400).children((
+            Switch::new("Newsletter").test_id("switch"),
+            Checkbox::new("Agree").test_id("checkbox"),
+            boxed("stretched", Length::Auto, 10),
+        ))
+    });
+    for id in ["switch", "checkbox"] {
+        let frame = frame_of(&app, id).await;
+        assert_eq!(frame.x(), 0.0);
+        assert!(frame.width() < 400.0, "{id} is not stretched across the column: {frame}");
+    }
+    assert_eq!(frame_of(&app, "stretched").await.width(), 400.0);
+}
+
+#[mitsuami_test::test]
+async fn toggles_follow_explicit_alignment(app: TestApp) {
+    app.mount(|| {
+        Column::new().width(400).children((
+            Grid::new().width(400).columns([1.fr()]).child(Switch::new("Grid").test_id("grid").justify_self(Align::End)),
+            Column::new().width(400).align(Align::Center).child(Switch::new("Column").test_id("column")),
+        ))
+    });
+    let grid = frame_of(&app, "grid").await;
+    assert_eq!(grid.x() + grid.width(), 400.0);
+    let column = frame_of(&app, "column").await;
+    assert_eq!(column.x(), (400.0 - column.width()) / 2.0);
+}
