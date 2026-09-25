@@ -472,7 +472,8 @@ async fn increments(app: TestApp) {
 
 ```
 cargo test                      # headless (default): integration tier
-cargo test -- --native          # same tests on AppKit / WinUI / GTK: e2e tier
+MITSUAMI_NATIVE=1 cargo test    # same tests on AppKit / WinUI / GTK: e2e tier
+                                # (or `-- --native` for a single harness=false target)
 cargo mitsuami visual           # visual regression tier (below)
 ```
 
@@ -572,7 +573,7 @@ This is exposed as `Backend::capture`.
 |---|---|---|
 | **M0 — Core + test harness** ✅ | Workspace; `mitsuami-reactive`; node tree; styles and units; Taffy integration; `Command` protocol; headless backend; `mitsuami-test` basics (custom runner, a11y queries, actions, settle, tree/layout/wireframe snapshots) | Counter and a flex/grid form pass headless integration tests written with the public test API; the reactive suite passes |
 | **M0.5 — WinUI spike** (in parallel) | Throwaway, using windows-rs 0.100: a window, a Canvas, a Button, Click and Measure, driven imperatively | Integration route (a/b/c) chosen |
-| **M1 — AppKit** | Window, View hosts, Text, Button, TextInput, Checkbox, Switch; run-loop flush; measure; resize → relayout | The M0 tests pass with `--native` on macOS; conformance suite v1 passes; `Backend::capture` works and a first visual baseline exists |
+| **M1 — AppKit** ✅ | Window, View hosts, Text, Button, TextInput, Checkbox, Switch; run-loop flush; measure; resize → relayout | The M0 tests pass with `--native` on macOS; conformance suite v1 passes; `Backend::capture` works and a first visual baseline exists |
 | **M2 — GTK 4** | The same widget set (developed and tested on Linux, e.g. a VM or CI) | The same tests and conformance suite pass with `--native` on Linux |
 | **M3 — WinUI 3** | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
 | **M4 — Escape hatches** | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn fallback) | Demo has a mac-specific screen sharing a store, and a custom widget with three renders |
@@ -598,7 +599,18 @@ Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, d
 | Platform vs runtime checks | Platform is compile-time (`platform!`); capabilities are runtime |
 | Testing | No unit tests. Integration (headless) + e2e (native) with one API; a11y-driven queries and actions; Chromatic-style visual regression; testing toolkit shipped to users |
 
-## 16. Open questions
+## 16. Implementation notes (M1)
+
+Things the AppKit backend taught us, some of them now part of the contract:
+
+- **Native views start with a zero frame.** The core only sends frames that differ from the last one it sent. AppKit controls come with frames of their own, so the backend zeroes them on creation. The mirror check caught this for a `display: none` label.
+- **Presses go through `accessibilityPerformPress`**, the path VoiceOver uses. For windows that aren't on screen, it returns `NO` even after pressing, so the result is ignored.
+- **Typing goes through the field editor** (`insertText:`, `deleteBackward:`, `insertNewline:`), so the delegate and action paths are the real ones. Focusing a field selects all of its text, so the backend puts the caret at the end before typing, like clicking past the end would.
+- **Tests run in offscreen windows** with the light appearance forced, for comparable captures (`MITSUAMI_SHOW_WINDOWS=1` shows them). Default (Primary) buttons render grey in inactive windows. That's AppKit's behavior, and baselines reflect it.
+- **`cargo test -- --native` also reaches libtest harnesses**, which reject the flag, so `MITSUAMI_NATIVE=1` is the workspace-wide switch.
+- **Known gap: min-content text measurement.** Min-content currently falls back to max-content, so text never shrinks below one line inside flex rows. It still wraps under a definite width (columns, fixed widths).
+
+## 17. Open questions
 
 - The exact Windows floor for Windows App SDK 2.4.
 - Whether `windows-reactor` allows imperative element access (answered by the M0.5 spike).

@@ -116,6 +116,11 @@ impl<'a> Locator<'a> {
         !node.frame.size.is_empty() && node.frame.intersection(&bounds).is_some()
     }
 
+    /// Has keyboard focus, according to the native widget.
+    pub fn is_focused(&self) -> bool {
+        self.native_state().focused
+    }
+
     /// What the native widget actually shows.
     pub fn native_state(&self) -> NativeState {
         let id = self.id();
@@ -250,6 +255,22 @@ impl<'a> Expectation<'a> {
     pub async fn not_to_be_checked(&self) {
         self.check(|l| if l.try_node()?.checked == Some(false) { Ok(()) } else { Err("not to be checked".into()) })
             .await;
+    }
+
+    pub async fn to_be_focused(&self) {
+        self.check(|l| {
+            l.try_node()?;
+            if l.is_focused() { Ok(()) } else { Err("to be focused".into()) }
+        })
+        .await;
+    }
+
+    pub async fn not_to_be_focused(&self) {
+        self.check(|l| {
+            l.try_node()?;
+            if l.is_focused() { Err("not to be focused".into()) } else { Ok(()) }
+        })
+        .await;
     }
 
     pub async fn to_be_enabled(&self) {

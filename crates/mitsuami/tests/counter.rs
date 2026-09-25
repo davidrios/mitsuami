@@ -1,7 +1,7 @@
 //! The canonical counter: reactive text, events, conditional rendering, and
 //! the exact commands a click produces.
 
-use mitsuami::core::{Command, Prop};
+use mitsuami::core::{Command, Point, Prop};
 use mitsuami::prelude::*;
 use mitsuami_test::prelude::*;
 
@@ -43,6 +43,22 @@ async fn conditional_text_appears_and_goes_away(app: TestApp) {
 #[mitsuami_test::test]
 async fn layout_uses_padding_gap_and_intrinsic_sizes(app: TestApp) {
     app.mount(|| counter(0));
+    let text = app.get_by_text("Count: 0").frame();
+    let increment = app.get_by_role(Role::Button, "Increment").frame();
+    let reset = app.get_by_role(Role::Button, "Reset").frame();
+
+    // Padding, gaps and alignment hold whatever the platform's text metrics.
+    assert_eq!(text.origin, Point::new(16.0, 16.0));
+    assert!(!text.size.is_empty() && !increment.size.is_empty());
+    assert_eq!(increment.x(), 16.0);
+    assert_eq!(increment.y(), text.max_y() + 8.0);
+    assert_eq!(reset.x(), increment.max_x() + 8.0);
+    assert_eq!(reset.y(), increment.y());
+}
+
+#[mitsuami_test::test(headless)]
+async fn layout_matches_headless_metrics_exactly(app: TestApp) {
+    app.mount(|| counter(0));
 
     // Headless metrics: 16px body text, 8px per character, 20px lines;
     // buttons add 12px padding per side and are 28px tall.
@@ -55,15 +71,15 @@ async fn layout_uses_padding_gap_and_intrinsic_sizes(app: TestApp) {
 async fn a_click_sends_only_the_prop_that_changed(app: TestApp) {
     app.mount(|| counter(0));
     let text = app.get_by_text("Count: 0").id();
-    app.headless().take_command_log();
+    app.take_command_log();
 
     app.get_by_role(Role::Button, "Increment").click().await;
 
-    // Same width text, so no frame changes either.
-    assert_eq!(
-        app.headless().take_command_log(),
-        vec![Command::SetProp { id: text, prop: Prop::Text("Count: 1".into()) }]
-    );
+    // Only the text changes (frames may follow if the platform's digits
+    // differ in width); nothing is created, destroyed or re-sent.
+    let log = app.take_command_log();
+    let changes: Vec<&Command> = log.iter().filter(|c| !matches!(c, Command::SetFrame { .. })).collect();
+    assert_eq!(changes, vec![&Command::SetProp { id: text, prop: Prop::Text("Count: 1".into()) }]);
 }
 
 #[mitsuami_test::test]
@@ -80,6 +96,7 @@ async fn initial_render_snapshots(app: TestApp) {
     app.assert_tree_snapshot("initial");
     app.assert_a11y_snapshot("initial");
     app.assert_wireframe_snapshot("initial");
+    app.assert_visual_snapshot("initial");
 }
 
 mitsuami_test::main!();

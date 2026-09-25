@@ -59,12 +59,11 @@ async fn typing_updates_on_every_keystroke(app: TestApp) {
 async fn native_edits_are_not_echoed_back_to_the_widget(app: TestApp) {
     mount(&app);
     let input = app.get_by_label("Name").id();
-    app.headless().take_command_log();
+    app.take_command_log();
 
     app.get_by_label("Name").type_text("Al").await;
 
     let echoes: Vec<Command> = app
-        .headless()
         .take_command_log()
         .into_iter()
         .filter(|c| matches!(c, Command::SetProp { id, .. } if *id == input))

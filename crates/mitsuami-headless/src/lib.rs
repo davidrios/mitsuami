@@ -75,6 +75,32 @@ impl State {
         }
     }
 
+    /// The next focusable control after `id` in tree order, wrapping around
+    /// within its window: full keyboard access, where every control takes focus.
+    fn next_focusable(&self, id: NodeId) -> Option<NodeId> {
+        let mut root = id;
+        while let Some(parent) = self.nodes.get(&root).and_then(|n| n.parent) {
+            root = parent;
+        }
+        let mut order = Vec::new();
+        let mut stack = vec![root];
+        while let Some(node_id) = stack.pop() {
+            let node = &self.nodes[&node_id];
+            let enabled = find_prop!(node.props, Enabled) != Some(false);
+            if enabled
+                && matches!(
+                    node.kind,
+                    WidgetKind::Button | WidgetKind::TextInput | WidgetKind::Checkbox | WidgetKind::Switch
+                )
+            {
+                order.push(node_id);
+            }
+            stack.extend(node.children.iter().rev());
+        }
+        let position = order.iter().position(|n| *n == id)?;
+        order.get(position + 1).or(order.first()).copied().filter(|next| *next != id)
+    }
+
     fn focus(&mut self, id: NodeId) {
         if self.focused == Some(id) {
             return;
@@ -343,6 +369,12 @@ impl Backend for HeadlessBackend {
                 state.emit(id, UiEvent::Changed(EventValue::Text(text)));
             }
             (WidgetKind::TextInput, Key::Enter) => state.emit(id, UiEvent::Submit),
+            // Moves focus on; the field keeps its text and does not submit.
+            (WidgetKind::TextInput, Key::Tab) => {
+                if let Some(next) = state.next_focusable(id) {
+                    state.focus(next);
+                }
+            }
             (WidgetKind::Button, Key::Enter | Key::Char(' ')) => state.emit(id, UiEvent::Click),
             (WidgetKind::Checkbox | WidgetKind::Switch, Key::Char(' ')) => {
                 drop(state);
@@ -362,6 +394,7 @@ impl Backend for HeadlessBackend {
             frame: node.frame,
             parent: node.parent,
             children: node.children.clone(),
+            focused: state.focused == Some(id),
         })
     }
 

@@ -12,14 +12,17 @@ use similar::TextDiff;
 
 use crate::app::TestContext;
 
-fn sanitize(s: &str) -> String {
+pub(crate) fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
 }
 
 #[track_caller]
-pub(crate) fn assert(context: &TestContext, name: &str, extension: &str, actual: &str) {
+pub(crate) fn assert(context: &TestContext, backend: Option<&str>, name: &str, extension: &str, actual: &str) {
     let dir = PathBuf::from(context.manifest_dir).join("tests").join("snapshots");
-    let file = dir.join(format!("{}@{}.{extension}", context.file_prefix, sanitize(name)));
+    // Backend-specific snapshots (frames, command logs) get the backend in
+    // their name; headless keeps the plain name.
+    let backend = backend.filter(|b| *b != "headless").map(|b| format!(".{b}")).unwrap_or_default();
+    let file = dir.join(format!("{}@{}{backend}.{extension}", context.file_prefix, sanitize(name)));
     let mut pending = file.clone().into_os_string();
     pending.push(".new");
     let pending = PathBuf::from(pending);

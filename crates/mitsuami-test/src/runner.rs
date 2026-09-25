@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use crate::__private::TestCase;
 use crate::app::{TestApp, TestContext};
+use crate::driver::{Mode, native_available, with_pool};
 use crate::exec::block_on;
 
 struct Options {
@@ -83,13 +84,12 @@ pub fn run_main() {
         println!("\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n");
         return;
     }
-    if options.native {
-        eprintln!(
-            "mitsuami-test: --native needs a native backend for this platform; none is available yet \
-             (they arrive in milestones M1–M3). Run without --native for headless tests."
-        );
+    let native = options.native || std::env::var("MITSUAMI_NATIVE").is_ok_and(|v| v == "1");
+    if native && !native_available() {
+        eprintln!("mitsuami-test: --native needs a native backend for this platform; none is available yet.");
         std::process::exit(2);
     }
+    let mode = if native { Mode::Native } else { Mode::Headless };
 
     panic::set_hook(Box::new(|info| {
         let location = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
@@ -100,10 +100,16 @@ pub fn run_main() {
     println!("\nrunning {} tests", cases.len());
     let started = Instant::now();
     let mut failures = Vec::new();
+    let mut ignored = 0;
     for case in &cases {
         let name = display_name(case);
         print!("test {name} ... ");
         let _ = std::io::stdout().flush();
+        if mode == Mode::Native && case.headless_only {
+            println!("ignored, headless only");
+            ignored += 1;
+            continue;
+        }
         let context = TestContext {
             name: name.to_owned(),
             file_prefix: case.name.replace("::", "__"),
@@ -111,8 +117,10 @@ pub fn run_main() {
         };
         let run = case.run;
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            let app = TestApp::new(context);
-            block_on(run(app));
+            with_pool(|| {
+                let app = TestApp::new(context, mode);
+                block_on(run(app));
+            })
         }));
         match result {
             Ok(()) => println!("ok"),
@@ -137,8 +145,8 @@ pub fn run_main() {
     }
     let status = if failures.is_empty() { "ok" } else { "FAILED" };
     println!(
-        "\ntest result: {status}. {} passed; {} failed; 0 ignored; 0 measured; {} filtered out; finished in {:.2}s\n",
-        cases.len() - failures.len(),
+        "\ntest result: {status}. {} passed; {} failed; {ignored} ignored; 0 measured; {} filtered out; finished in {:.2}s\n",
+        cases.len() - failures.len() - ignored,
         failures.len(),
         total - cases.len(),
         started.elapsed().as_secs_f64()

@@ -1,12 +1,13 @@
 use std::cell::Cell;
 
-use mitsuami_core::{A11yNode, NodeId, NodeInfo, Role, Size, Ui, View};
-use mitsuami_headless::{HeadlessBackend, HeadlessHandle};
+use mitsuami_core::{A11yNode, Command, NodeId, NodeInfo, Role, Size, Ui, View};
+use mitsuami_headless::HeadlessHandle;
 use mitsuami_reactive::Owner;
 
+use crate::driver::{Driver, Mode};
 use crate::locator::{Expectation, Locator};
 use crate::query::{Query, by_label, by_role, by_test_id, by_text};
-use crate::{format, snapshot};
+use crate::{format, snapshot, visual};
 
 pub(crate) struct TestContext {
     /// `module::path::test_name`, without the crate.
@@ -18,7 +19,7 @@ pub(crate) struct TestContext {
 /// The app under test: a [`Ui`] with one window, driven by the test.
 pub struct TestApp {
     ui: Ui,
-    headless: HeadlessHandle,
+    driver: Driver,
     owner: Owner,
     window: Cell<Option<NodeId>>,
     pub(crate) context: TestContext,
@@ -28,19 +29,42 @@ pub struct TestApp {
 pub const DEFAULT_WINDOW: Size = Size::new(800.0, 600.0);
 
 impl TestApp {
-    pub(crate) fn new(context: TestContext) -> TestApp {
-        let backend = HeadlessBackend::new();
-        let headless = backend.handle();
-        TestApp { ui: Ui::new(backend), headless, owner: Owner::new_root(), window: Cell::new(None), context }
+    pub(crate) fn new(context: TestContext, mode: Mode) -> TestApp {
+        let (ui, driver) = Driver::create(mode);
+        TestApp { ui, driver, owner: Owner::new_root(), window: Cell::new(None), context }
     }
 
     pub fn ui(&self) -> &Ui {
         &self.ui
     }
 
-    /// The headless backend: command log, simulated system changes.
+    /// The backend this test runs on: `"headless"`, `"appkit"`, …
+    pub fn backend_name(&self) -> &'static str {
+        self.driver.name()
+    }
+
+    pub fn is_headless(&self) -> bool {
+        matches!(self.driver, Driver::Headless(_))
+    }
+
+    /// The headless backend, for simulating system changes. Tests using it
+    /// must be marked `#[mitsuami_test::test(headless)]`.
     pub fn headless(&self) -> &HeadlessHandle {
-        &self.headless
+        match &self.driver {
+            Driver::Headless(h) => h,
+            #[allow(unreachable_patterns)]
+            _ => panic!("this test uses headless-only APIs; mark it #[mitsuami_test::test(headless)]"),
+        }
+    }
+
+    /// Commands the backend applied since the last call.
+    pub fn take_command_log(&self) -> Vec<Command> {
+        self.driver.take_command_log()
+    }
+
+    /// Number of live native widgets: a leak detector.
+    pub fn native_node_count(&self) -> usize {
+        self.driver.node_count()
     }
 
     /// Name of the running test.
@@ -87,7 +111,7 @@ impl TestApp {
 
     /// Simulates the user resizing the window.
     pub async fn resize(&self, width: f32, height: f32) {
-        self.headless.resize_window(self.window(), Size::new(width, height));
+        self.driver.resize_window(self.window(), Size::new(width, height));
         self.settle().await;
     }
 
@@ -128,26 +152,44 @@ impl TestApp {
     /// coordinates) with `tests/snapshots/<test>@<name>.tree.txt`.
     #[track_caller]
     pub fn assert_tree_snapshot(&self, name: &str) {
-        snapshot::assert(&self.context, name, "tree.txt", &format::tree(&self.inspect()));
+        snapshot::assert(&self.context, Some(self.backend_name()), name, "tree.txt", &format::tree(&self.inspect()));
     }
 
     /// Compares the accessibility tree with a snapshot.
     #[track_caller]
     pub fn assert_a11y_snapshot(&self, name: &str) {
-        snapshot::assert(&self.context, name, "a11y.txt", &format::a11y(&self.a11y_tree()));
+        // The accessibility tree is computed by the core: one snapshot for all backends.
+        snapshot::assert(&self.context, None, name, "a11y.txt", &format::a11y(&self.a11y_tree()));
     }
 
     /// Compares an SVG wireframe of the layout with a snapshot.
     #[track_caller]
     pub fn assert_wireframe_snapshot(&self, name: &str) {
-        snapshot::assert(&self.context, name, "wireframe.svg", &format::wireframe(&self.inspect()));
+        snapshot::assert(
+            &self.context,
+            Some(self.backend_name()),
+            name,
+            "wireframe.svg",
+            &format::wireframe(&self.inspect()),
+        );
     }
 
     /// Compares the commands sent to the backend since the last call.
     #[track_caller]
     pub fn assert_commands_snapshot(&self, name: &str) {
-        let log = self.headless.take_command_log();
-        snapshot::assert(&self.context, name, "commands.txt", &format::commands(&log));
+        let log = self.driver.take_command_log();
+        snapshot::assert(&self.context, Some(self.backend_name()), name, "commands.txt", &format::commands(&log));
+    }
+
+    /// Captures the window and compares it with the PNG baseline in
+    /// `tests/visual/<backend>/`. Headless has no pixels, so it skips.
+    #[track_caller]
+    pub fn assert_visual_snapshot(&self, name: &str) {
+        match self.ui.capture(self.window()) {
+            Ok(image) => visual::assert(&self.context, self.backend_name(), name, &image),
+            Err(mitsuami_core::backend::CaptureError::Unsupported) => {}
+            Err(e) => panic!("cannot capture the window: {e:?}"),
+        }
     }
 
     /// Disposes everything mounted and destroys the window.
@@ -171,6 +213,10 @@ impl TestApp {
                 .unwrap_or_else(|| panic!("backend desync: {} {} has no native widget", node.kind.name(), node.id));
             let children: Vec<NodeId> = node.children.iter().map(|c| c.id).collect();
             assert_eq!(native.children, children, "backend desync: children of {} {}", node.kind.name(), node.id);
+            if node.kind != mitsuami_core::WidgetKind::Window {
+                let frame = self.ui.frame(node.id).unwrap_or_default();
+                assert_eq!(native.frame, frame, "backend desync: frame of {} {}", node.kind.name(), node.id);
+            }
             for prop in &node.props {
                 assert!(
                     native.props.contains(prop),

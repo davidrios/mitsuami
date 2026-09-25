@@ -11,6 +11,8 @@ use crate::widget::{NodeId, Prop, WidgetKind};
 /// it is destroyed.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    /// Native views start with a zero frame; the core only sends frames
+    /// that differ from the last one it sent.
     Create {
         id: NodeId,
         kind: WidgetKind,

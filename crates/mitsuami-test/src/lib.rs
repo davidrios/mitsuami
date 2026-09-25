@@ -20,14 +20,17 @@
 //! input, the way users and assistive technology reach them.
 
 mod app;
+mod driver;
 mod exec;
 mod format;
 mod locator;
 mod query;
 mod runner;
 mod snapshot;
+mod visual;
 
 pub use app::TestApp;
+pub use driver::Mode;
 pub use locator::{Expectation, Locator};
 pub use mitsuami_test_macros::test;
 pub use query::{Query, by_label, by_role, by_test_id, by_text};
@@ -61,6 +64,9 @@ pub mod __private {
     pub struct TestCase {
         pub name: &'static str,
         pub manifest_dir: &'static str,
+        /// Depends on the headless backend (fake metrics, simulated
+        /// system changes): skipped with `--native`.
+        pub headless_only: bool,
         pub run: fn(crate::TestApp) -> TestFuture,
     }
 

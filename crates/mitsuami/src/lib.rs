@@ -13,17 +13,21 @@
 //! }
 //! ```
 //!
-//! The platform backend is chosen by target OS. Backends arrive in M1–M3;
-//! until then, use `mitsuami-test` to run views headlessly.
+//! The platform backend is chosen by target OS: AppKit on macOS today, GTK
+//! and WinUI 3 in M2/M3.
 
+mod app;
+
+pub use app::App;
 pub use mitsuami_core as core;
 pub use mitsuami_reactive as reactive;
 pub use mitsuami_widgets as widgets;
 
 pub mod prelude {
+    pub use crate::App;
     pub use mitsuami_core::{
         Align, ButtonVariant, Children, Element, ElementBuilder, FlexDirection, For, GridPlacement, Justify, Length,
-        LengthExt, NodeId, Role, Show, Spacing, TextDirection, TextStyle, Track, Ui, View, repeat,
+        LengthExt, NodeId, Role, Show, Size, Spacing, TextDirection, TextStyle, Track, Ui, View, repeat,
     };
     pub use mitsuami_reactive::{
         Computed, IntoValue, Owner, Signal, Value, batch, computed, effect, inject, on_cleanup, provide, signal,

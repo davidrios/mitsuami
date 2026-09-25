@@ -399,6 +399,20 @@ impl Ui {
         }
     }
 
+    /// One run-loop turn: dispatch events and commit, repeating while the
+    /// commit itself produced new events (e.g. a window resize), until idle.
+    /// Backends call this from their run loop, before it goes to sleep.
+    pub fn tick(&self) {
+        const MAX_TURNS: usize = 16;
+        for _ in 0..MAX_TURNS {
+            self.process_events();
+            self.commit();
+            if self.inner.borrow().events.is_empty() {
+                return;
+            }
+        }
+    }
+
     /// Asks the backend to perform an accessibility action, then dispatches
     /// the events it produced.
     pub fn perform(&self, id: NodeId, action: &A11yAction) -> Result<(), ActionError> {

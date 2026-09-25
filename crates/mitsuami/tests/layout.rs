@@ -48,13 +48,16 @@ async fn units_resolve_against_font_viewport_parent_and_tokens(app: TestApp) {
             boxed("token", Spacing::Md, Spacing::Xl),
         ))
     });
-    // 16px body font, 800×600 window, headless spacing md=12 xl=24.
-    assert_eq!(frame_of(&app, "em").await.size, Size::new(32.0, 24.0));
-    assert_eq!(frame_of(&app, "rem").await.size, Size::new(48.0, 10.0));
+    // Font sizes and spacing tokens come from the platform; the window is 800×600.
+    let metrics = app.ui().metrics();
+    let body = metrics.font_sizes.body;
+    let size = |w: f32, h: f32| Size::new(w.round(), h.round());
+    assert_eq!(frame_of(&app, "em").await.size, size(2.0 * body, 1.5 * body));
+    assert_eq!(frame_of(&app, "rem").await.size, size(3.0 * body, 10.0));
     assert_eq!(frame_of(&app, "pct").await.size, Size::new(400.0, 10.0));
     assert_eq!(frame_of(&app, "viewport").await.size, Size::new(80.0, 60.0));
     assert_eq!(frame_of(&app, "vmin").await.size, Size::new(60.0, 80.0));
-    assert_eq!(frame_of(&app, "token").await.size, Size::new(12.0, 24.0));
+    assert_eq!(frame_of(&app, "token").await.size, size(metrics.spacing.md, metrics.spacing.xl));
 }
 
 #[mitsuami_test::test]
@@ -93,6 +96,19 @@ async fn grow_fills_the_remaining_space(app: TestApp) {
 
 #[mitsuami_test::test]
 async fn text_wraps_to_the_available_width(app: TestApp) {
+    app.mount(|| {
+        Row::new()
+            .align(Align::Start)
+            .children((Column::new().width(100).child(Text::new("hello wonderful world")), Text::new("hello")))
+    });
+    let wrapped = app.get_by_text("hello wonderful world").frame();
+    let one_line = app.get_by_text("hello").frame();
+    assert_eq!(wrapped.width(), 100.0);
+    assert!(wrapped.height() >= 2.0 * one_line.height(), "{wrapped} should span several lines of {one_line}");
+}
+
+#[mitsuami_test::test(headless)]
+async fn text_wraps_word_by_word_with_headless_metrics(app: TestApp) {
     app.mount(|| Column::new().width(100).child(Text::new("hello wonderful world")));
     // 8px per character: "hello" / "wonderful" / "world" on three 20px lines.
     app.expect(by_text("hello wonderful world")).to_have_frame(Rect::new(0.0, 0.0, 100.0, 60.0)).await;
@@ -127,7 +143,7 @@ async fn viewport_units_follow_window_resizes(app: TestApp) {
     assert_eq!(frame_of(&app, "half").await.size, Size::new(200.0, 30.0));
 }
 
-#[mitsuami_test::test]
+#[mitsuami_test::test(headless)]
 async fn rem_and_text_follow_the_system_text_size(app: TestApp) {
     app.mount(|| Column::new().align(Align::Start).children((boxed("rem", 10.rem(), 10), Text::new("Hi"))));
     assert_eq!(frame_of(&app, "rem").await.size.width, 160.0);
@@ -143,13 +159,15 @@ async fn rem_and_text_follow_the_system_text_size(app: TestApp) {
 }
 
 #[mitsuami_test::test]
-async fn text_styles_change_font_size_and_em(app: TestApp) {
+async fn text_styles_change_font_size(app: TestApp) {
     app.mount(|| {
         Column::new().align(Align::Start).children((Text::new("Title").text_style(TextStyle::Title), Text::new("Body")))
     });
-    // Title is 24px: 12px per character, 30px line.
-    app.expect(by_text("Title")).to_have_frame(Rect::new(0.0, 0.0, 60.0, 30.0)).await;
-    app.expect(by_text("Body")).to_have_frame(Rect::new(0.0, 30.0, 32.0, 20.0)).await;
+    let title = app.get_by_text("Title").frame();
+    let body = app.get_by_text("Body").frame();
+    assert_eq!(title.origin, Point::new(0.0, 0.0));
+    assert_eq!(body.y(), title.max_y());
+    assert!(title.height() > body.height(), "title {title} should be taller than body {body}");
 }
 
 #[mitsuami_test::test]

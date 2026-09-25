@@ -43,16 +43,16 @@ async fn show_builds_and_disposes_its_branch(app: TestApp) {
             Text::new("Details")
         }))
     });
-    let baseline = app.headless().node_count();
+    let baseline = app.native_node_count();
 
     open.set(true);
     app.expect(by_text("Details")).to_be_visible().await;
-    assert_eq!(app.headless().node_count(), baseline + 1);
+    assert_eq!(app.native_node_count(), baseline + 1);
 
     open.set(false);
     app.expect(by_text("Details")).not_to_exist().await;
     assert_eq!(disposed.get(), 1, "branch state was disposed");
-    assert_eq!(app.headless().node_count(), baseline, "native widget was destroyed");
+    assert_eq!(app.native_node_count(), baseline, "native widget was destroyed");
 }
 
 #[mitsuami_test::test]
@@ -97,14 +97,14 @@ async fn removed_rows_are_disposed_and_new_rows_rendered(app: TestApp) {
     let disposed = Rc::new(Cell::new(0));
     let d = disposed.clone();
     app.mount(move || list(items, d));
-    let before = app.headless().node_count();
+    let before = app.native_node_count();
 
     items.set(vec![item(2, "b"), item(4, "d")]);
     app.settle().await;
 
     assert_eq!(texts(&app), ["b", "d"]);
     assert_eq!(disposed.get(), 1);
-    assert_eq!(app.headless().node_count(), before, "one row out, one row in");
+    assert_eq!(app.native_node_count(), before, "one row out, one row in");
 }
 
 #[mitsuami_test::test]
@@ -114,9 +114,12 @@ async fn rows_are_laid_out_where_they_appear(app: TestApp) {
 
     items.update(|v| v.insert(0, item(0, "zeroth")));
 
-    // Rows are 20px tall (text line; checkbox is 20px too).
-    app.expect(by_text("zeroth")).to_have_frame(Rect::new(0.0, 0.0, 48.0, 20.0)).await;
-    app.expect(by_text("first")).to_have_frame(Rect::new(0.0, 20.0, 40.0, 20.0)).await;
+    app.settle().await;
+    let zeroth = app.get_by_role(Role::Checkbox, "zeroth done").frame();
+    let first = app.get_by_role(Role::Checkbox, "first done").frame();
+    let second = app.get_by_role(Role::Checkbox, "second done").frame();
+    assert_eq!(app.get_by_text("zeroth").frame().y(), 0.0);
+    assert!(zeroth.y() < first.y() && first.y() < second.y());
 }
 
 #[mitsuami_test::test]
@@ -128,7 +131,7 @@ async fn unmounting_releases_every_native_widget_and_all_state(app: TestApp) {
 
     app.unmount();
 
-    assert_eq!(app.headless().node_count(), 0);
+    assert_eq!(app.native_node_count(), 0);
     assert_eq!(disposed.get(), 2);
 }
 

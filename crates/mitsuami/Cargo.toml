@@ -13,6 +13,9 @@ mitsuami-core.workspace = true
 mitsuami-reactive.workspace = true
 mitsuami-widgets.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+mitsuami-appkit.workspace = true
+
 [dev-dependencies]
 mitsuami-test.workspace = true
 
@@ -30,6 +33,10 @@ harness = false
 
 [[test]]
 name = "control_flow"
+harness = false
+
+[[test]]
+name = "conformance"
 harness = false
 
 [lints]

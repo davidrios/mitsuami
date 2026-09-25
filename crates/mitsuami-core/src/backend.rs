@@ -88,6 +88,8 @@ pub struct NativeState {
     pub frame: Rect,
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
+    /// Has keyboard focus (for text fields: is being edited).
+    pub focused: bool,
 }
 
 /// An RGBA8 screenshot in physical pixels.
@@ -121,6 +123,10 @@ impl EventSink {
 
     pub(crate) fn pop(&self) -> Option<(NodeId, UiEvent)> {
         self.queue.borrow_mut().pop_front()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.borrow().is_empty()
     }
 }
 
