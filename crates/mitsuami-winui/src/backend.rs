@@ -1138,6 +1138,11 @@ impl State {
                         if content.Content().is_ok_and(|c| !c.as_raw().is_null()) {
                             violation(command, "a ScrollView has a single native child (its content)");
                         }
+                        // The content has a fixed size: at the default Stretch,
+                        // XAML centers it when it's smaller than the viewport.
+                        let fe: w::IFrameworkElement = child_element.cast()?;
+                        fe.SetHorizontalAlignment(w::HorizontalAlignment::Left)?;
+                        fe.SetVerticalAlignment(w::VerticalAlignment::Top)?;
                         content.SetContent(&child_element)?;
                     }
                     Some(_) => {

@@ -1545,6 +1545,22 @@ unsafe impl Send for Grid {}
 unsafe impl Sync for Grid {}
 pub type HANDLE = *mut core::ffi::c_void;
 pub type HWND = *mut core::ffi::c_void;
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HorizontalAlignment(pub i32);
+impl HorizontalAlignment {
+    pub const Left: Self = Self(0);
+    pub const Center: Self = Self(1);
+    pub const Right: Self = Self(2);
+    pub const Stretch: Self = Self(3);
+}
+impl windows_core::imp::TypeKind for HorizontalAlignment {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for HorizontalAlignment {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Microsoft.UI.Xaml.HorizontalAlignment;i4)");
+}
 windows_core::imp::define_interface!(
     IAccessibilitySettings,
     IAccessibilitySettings_Vtbl,
@@ -2934,6 +2950,18 @@ impl IFrameworkElement {
             (windows_core::Interface::vtable(self).SetMinWidth)(windows_core::Interface::as_raw(self), value).ok()
         }
     }
+    pub fn SetHorizontalAlignment(&self, value: HorizontalAlignment) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetHorizontalAlignment)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn SetVerticalAlignment(&self, value: VerticalAlignment) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetVerticalAlignment)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
     pub fn SetStyle<P0>(&self, value: P0) -> windows_core::Result<()>
     where
         P0: windows_core::Param<Style>,
@@ -3033,9 +3061,11 @@ pub struct IFrameworkElement_Vtbl {
     MaxHeight: usize,
     SetMaxHeight: usize,
     HorizontalAlignment: usize,
-    SetHorizontalAlignment: usize,
+    pub SetHorizontalAlignment:
+        unsafe extern "system" fn(*mut core::ffi::c_void, HorizontalAlignment) -> windows_core::HRESULT,
     VerticalAlignment: usize,
-    SetVerticalAlignment: usize,
+    pub SetVerticalAlignment:
+        unsafe extern "system" fn(*mut core::ffi::c_void, VerticalAlignment) -> windows_core::HRESULT,
     Margin: usize,
     SetMargin: usize,
     Name: usize,
@@ -7973,6 +8003,22 @@ impl windows_core::RuntimeName for UISettings {
 unsafe impl Send for UISettings {}
 unsafe impl Sync for UISettings {}
 pub const VK_SHIFT: i32 = 16;
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VerticalAlignment(pub i32);
+impl VerticalAlignment {
+    pub const Top: Self = Self(0);
+    pub const Center: Self = Self(1);
+    pub const Bottom: Self = Self(2);
+    pub const Stretch: Self = Self(3);
+}
+impl windows_core::imp::TypeKind for VerticalAlignment {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for VerticalAlignment {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Microsoft.UI.Xaml.VerticalAlignment;i4)");
+}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct VirtualKey(pub i32);
