@@ -155,7 +155,7 @@ These make one test suite run against every backend.
   - `Click(point)` on **drawn** custom widgets: a real down/up pair through your drawn view's event handlers. `Unsupported` elsewhere; native controls often track the mouse in a modal loop.
 - **`native_state(id)`**: **read back from the widget** what it actually shows: text, title, value, placeholder, checked, enabled, frame, children (in native order), focused, and scroll offset. Only cache what the platform can't report (AppKit caches the text style and variant). After every settle, the test harness compares this with the core and fails on any difference. This check has caught every serious backend bug so far.
 - **`capture(id, reply)`**: offscreen RGBA8 at backing scale, rows top to bottom. Reply when the image is ready, right away if possible. Examples:
-  - AppKit: `cacheDisplayInRect:toBitmapImageRep:`, which replies immediately.
+  - AppKit: `cacheDisplayInRect:toBitmapImageRep:`, which replies immediately. The test window is never key, so captures show the unfocused-window look (grey default buttons).
   - GTK: `gtk::WidgetPaintable` + snapshot + `render_texture` (Cairo renderer), then download. Replies from the frame clock's `after-paint`, once the widget is mapped and laid out.
   - WinUI: `RenderTargetBitmap.RenderAsync`, then `GetPixelsAsync`, replying from the completion.
 

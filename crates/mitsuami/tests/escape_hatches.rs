@@ -195,6 +195,20 @@ fn lock(locked: Signal<bool>) -> mitsuami::core::Custom<Lock> {
     })
 }
 
+/// The native lock reports its state as its value; the composed stand-in, a
+/// plain button, shows it in its caption: what a click would do.
+async fn expect_locked(app: &TestApp, locked: bool) {
+    if Lock::renderer().is_native() {
+        let value = if locked { "Locked" } else { "Unlocked" };
+        app.expect(by_role(Role::Button, "Lock")).to_have_value(value).await;
+    } else {
+        app.settle().await;
+        let caption = if locked { "Unlock" } else { "Lock" };
+        let props = app.get_by_role(Role::Button, "Lock").native_state().props;
+        assert!(props.contains(&Prop::Label(caption.into())), "expected caption {caption:?} in {props:?}");
+    }
+}
+
 #[mitsuami_test::test]
 async fn locks_ask_and_the_app_decides(app: TestApp) {
     let locked = signal(true);
@@ -211,14 +225,13 @@ async fn locks_ask_and_the_app_decides(app: TestApp) {
             },
         ))
     });
-    let button = app.get_by_role(Role::Button, "Lock");
-    assert_eq!(button.value().as_deref(), Some("Locked"));
+    expect_locked(&app, true).await;
 
-    button.click().await;
-    app.expect(by_role(Role::Button, "Lock")).to_have_value("Unlocked").await;
-    button.click().await;
+    app.get_by_role(Role::Button, "Lock").click().await;
+    expect_locked(&app, false).await;
+    app.get_by_role(Role::Button, "Lock").click().await;
     // Refused: still unlocked, natively too (the mirror check reads it back).
-    app.expect(by_role(Role::Button, "Lock")).to_have_value("Unlocked").await;
+    expect_locked(&app, false).await;
     assert_eq!(*requests.borrow(), [LockEvent::UnlockRequested, LockEvent::LockRequested]);
 }
 
