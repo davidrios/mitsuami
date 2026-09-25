@@ -1,0 +1,15 @@
+[package]
+name = "mitsuami-core"
+description = "Node tree, layout, styles, units, a11y model and backend contract for mitsuami"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mitsuami-reactive.workspace = true
+taffy.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,7 @@
+Window "mitsuami test"
+  TextField "Name" value="Ada"
+  StaticText "Hello, Ada"
+  Checkbox "I agree to the terms" checked=false
+  Switch "Newsletter" checked=true
+  StaticText "newsletter: true"
+  Button "Sign up" disabled

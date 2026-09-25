@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+authors = ["David Rios <david.rios.gomes@gmail.com>"]
+
+[workspace.dependencies]
+mitsuami = { path = "crates/mitsuami" }
+mitsuami-reactive = { path = "crates/mitsuami-reactive" }
+mitsuami-core = { path = "crates/mitsuami-core" }
+mitsuami-widgets = { path = "crates/mitsuami-widgets" }
+mitsuami-headless = { path = "crates/mitsuami-headless" }
+mitsuami-test = { path = "crates/mitsuami-test" }
+mitsuami-test-macros = { path = "crates/mitsuami-test-macros" }
+
+slotmap = "1.1"
+taffy = "0.14"
+inventory = "0.3"
+similar = "2"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

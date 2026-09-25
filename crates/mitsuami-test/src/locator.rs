@@ -1,0 +1,271 @@
+use mitsuami_core::{A11yAction, A11yNode, Key, NativeState, NodeId, Rect, Role, SyntheticInput};
+
+use crate::app::TestApp;
+use crate::format;
+use crate::query::Query;
+
+/// A lazy reference to a node: the query runs again on every use, so a
+/// locator stays valid across re-renders.
+pub struct Locator<'a> {
+    app: &'a TestApp,
+    query: Query,
+}
+
+impl<'a> Locator<'a> {
+    pub(crate) fn new(app: &'a TestApp, query: Query) -> Locator<'a> {
+        Locator { app, query }
+    }
+
+    pub fn query(&self) -> &Query {
+        &self.query
+    }
+
+    fn all(&self) -> Vec<A11yNode> {
+        let mut out = Vec::new();
+        for window in self.app.ui().windows() {
+            let Some(tree) = self.app.ui().a11y_tree(window) else { continue };
+            let semantic = tree.walk();
+            if let Query::TestId(test_id) = &self.query {
+                // Test ids also reach nodes the a11y tree leaves out, such as
+                // plain layout containers.
+                let Some(native) = self.app.ui().inspect(window) else { continue };
+                let mut stack = vec![native];
+                while let Some(node) = stack.pop() {
+                    if node.test_id.as_ref() == Some(test_id) {
+                        out.push(semantic.iter().find(|n| n.id == node.id).map(|n| (*n).clone()).unwrap_or(A11yNode {
+                            id: node.id,
+                            role: Role::None,
+                            name: None,
+                            description: None,
+                            value: None,
+                            checked: None,
+                            enabled: true,
+                            test_id: node.test_id.clone(),
+                            frame: node.frame,
+                            children: Vec::new(),
+                        }));
+                    }
+                    stack.extend(node.children);
+                }
+            } else {
+                out.extend(semantic.into_iter().filter(|n| self.query.matches(n)).cloned());
+            }
+        }
+        out
+    }
+
+    fn try_node(&self) -> Result<A11yNode, String> {
+        let mut found = self.all();
+        match found.len() {
+            1 => Ok(found.remove(0)),
+            0 => Err(format!("no node matches {}", self.query)),
+            n => Err(format!("{n} nodes match {}; make the query more specific", self.query)),
+        }
+    }
+
+    /// The single matching node. Panics, showing the accessibility tree, if
+    /// there are none or several.
+    pub fn node(&self) -> A11yNode {
+        self.try_node().unwrap_or_else(|e| self.fail(&e))
+    }
+
+    fn fail(&self, message: &str) -> ! {
+        panic!("{message}\n\naccessibility tree:\n{}", format::a11y(&self.app.a11y_tree()))
+    }
+
+    pub fn id(&self) -> NodeId {
+        self.node().id
+    }
+
+    pub fn count(&self) -> usize {
+        self.all().len()
+    }
+
+    pub fn exists(&self) -> bool {
+        self.count() > 0
+    }
+
+    /// In window coordinates.
+    pub fn frame(&self) -> Rect {
+        self.node().frame
+    }
+
+    /// Accessible name (for text: its content).
+    pub fn text(&self) -> Option<String> {
+        self.node().name
+    }
+
+    pub fn value(&self) -> Option<String> {
+        self.node().value
+    }
+
+    pub fn is_checked(&self) -> bool {
+        self.node().checked == Some(true)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.node().enabled
+    }
+
+    /// Has a non-empty frame that overlaps its window.
+    pub fn is_visible(&self) -> bool {
+        let Ok(node) = self.try_node() else { return false };
+        let Some(window) = self.app.ui().window_of(node.id) else { return false };
+        let size = self.app.ui().window_size(window).unwrap_or_default();
+        let bounds = Rect::new(0.0, 0.0, size.width, size.height);
+        !node.frame.size.is_empty() && node.frame.intersection(&bounds).is_some()
+    }
+
+    /// What the native widget actually shows.
+    pub fn native_state(&self) -> NativeState {
+        let id = self.id();
+        self.app.ui().native_state(id).unwrap_or_else(|| self.fail(&format!("{id} has no native widget")))
+    }
+
+    async fn act(&self, action: A11yAction) {
+        self.app.settle().await;
+        let node = self.node();
+        if let Err(e) = self.app.ui().perform(node.id, &action) {
+            self.fail(&format!("cannot {action:?} {}: {e}", self.query));
+        }
+        self.app.settle().await;
+    }
+
+    async fn input(&self, key: Key) {
+        let node = self.node();
+        if let Err(e) = self.app.ui().synthesize(node.id, &SyntheticInput::Key(key)) {
+            self.fail(&format!("cannot press {key:?} on {}: {e}", self.query));
+        }
+        self.app.settle().await;
+    }
+
+    /// Activates the control: click a button, toggle a checkbox.
+    pub async fn click(&self) {
+        self.act(A11yAction::Activate).await;
+    }
+
+    /// Replaces a text field's content in one step.
+    pub async fn fill(&self, text: &str) {
+        self.act(A11yAction::SetValue(text.to_owned())).await;
+    }
+
+    /// Types text one key at a time, like a user would.
+    pub async fn type_text(&self, text: &str) {
+        self.app.settle().await;
+        for c in text.chars() {
+            self.input(Key::Char(c)).await;
+        }
+    }
+
+    pub async fn press(&self, key: Key) {
+        self.app.settle().await;
+        self.input(key).await;
+    }
+
+    pub async fn focus(&self) {
+        self.act(A11yAction::Focus).await;
+    }
+
+    pub async fn check(&self) {
+        if !self.is_checked() {
+            self.click().await;
+        }
+    }
+
+    pub async fn uncheck(&self) {
+        if self.is_checked() {
+            self.click().await;
+        }
+    }
+}
+
+/// An assertion about a [`Locator`]. Every assertion first lets the UI
+/// settle, so no test ever needs to sleep.
+pub struct Expectation<'a> {
+    locator: Locator<'a>,
+}
+
+impl<'a> Expectation<'a> {
+    pub(crate) fn new(locator: Locator<'a>) -> Expectation<'a> {
+        Expectation { locator }
+    }
+
+    async fn check(&self, ok: impl Fn(&Locator<'a>) -> Result<(), String>) {
+        self.locator.app.settle().await;
+        if let Err(message) = ok(&self.locator) {
+            self.locator.fail(&format!("expected {}: {message}", self.locator.query));
+        }
+    }
+
+    pub async fn to_exist(&self) {
+        self.check(|l| l.try_node().map(drop)).await;
+    }
+
+    pub async fn not_to_exist(&self) {
+        self.check(|l| match l.count() {
+            0 => Ok(()),
+            n => Err(format!("not to exist, found {n}")),
+        })
+        .await;
+    }
+
+    pub async fn to_be_visible(&self) {
+        self.check(|l| {
+            l.try_node()?;
+            if l.is_visible() { Ok(()) } else { Err(format!("to be visible, frame is {}", l.frame())) }
+        })
+        .await;
+    }
+
+    /// Passes if the node is missing or not visible.
+    pub async fn to_be_hidden(&self) {
+        self.check(|l| if l.is_visible() { Err(format!("to be hidden, frame is {}", l.frame())) } else { Ok(()) })
+            .await;
+    }
+
+    pub async fn to_have_text(&self, text: &str) {
+        self.check(|l| {
+            let actual = l.try_node()?.name;
+            if actual.as_deref() == Some(text) { Ok(()) } else { Err(format!("to have text {text:?}, got {actual:?}")) }
+        })
+        .await;
+    }
+
+    pub async fn to_have_value(&self, value: &str) {
+        self.check(|l| {
+            let actual = l.try_node()?.value;
+            if actual.as_deref() == Some(value) {
+                Ok(())
+            } else {
+                Err(format!("to have value {value:?}, got {actual:?}"))
+            }
+        })
+        .await;
+    }
+
+    pub async fn to_be_checked(&self) {
+        self.check(|l| if l.try_node()?.checked == Some(true) { Ok(()) } else { Err("to be checked".into()) }).await;
+    }
+
+    pub async fn not_to_be_checked(&self) {
+        self.check(|l| if l.try_node()?.checked == Some(false) { Ok(()) } else { Err("not to be checked".into()) })
+            .await;
+    }
+
+    pub async fn to_be_enabled(&self) {
+        self.check(|l| if l.try_node()?.enabled { Ok(()) } else { Err("to be enabled".into()) }).await;
+    }
+
+    pub async fn to_be_disabled(&self) {
+        self.check(|l| if l.try_node()?.enabled { Err("to be disabled".into()) } else { Ok(()) }).await;
+    }
+
+    /// Frame in window coordinates.
+    pub async fn to_have_frame(&self, frame: Rect) {
+        self.check(|l| {
+            let actual = l.try_node()?.frame;
+            if actual == frame { Ok(()) } else { Err(format!("to have frame {frame}, got {actual}")) }
+        })
+        .await;
+    }
+}

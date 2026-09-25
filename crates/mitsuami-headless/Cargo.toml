@@ -1,0 +1,14 @@
+[package]
+name = "mitsuami-headless"
+description = "In-memory mitsuami backend with deterministic measurement, for tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mitsuami-core.workspace = true
+
+[lints]
+workspace = true

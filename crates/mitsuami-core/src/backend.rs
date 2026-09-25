@@ -1,0 +1,152 @@
+//! The contract every platform backend implements.
+
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::rc::Rc;
+
+use crate::a11y::{A11yAction, ActionError};
+use crate::command::{Command, UiEvent};
+use crate::geometry::{Rect, Size};
+use crate::units::SpacingScale;
+use crate::widget::{NodeId, Prop, TextStyle, WidgetKind};
+
+/// Space available on one axis while measuring.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AvailableSpace {
+    Definite(f32),
+    MinContent,
+    MaxContent,
+}
+
+/// What the layout engine asks when it measures a leaf widget.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeasureRequest {
+    /// Sizes that are already fixed; measure the other axis given these.
+    pub known_width: Option<f32>,
+    pub known_height: Option<f32>,
+    pub available_width: AvailableSpace,
+    pub available_height: AvailableSpace,
+}
+
+/// Platform facts the core needs for unit resolution and defaults.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlatformMetrics {
+    pub scale_factor: f32,
+    pub spacing: SpacingScale,
+    pub font_sizes: FontSizes,
+    pub dark_mode: bool,
+    pub high_contrast: bool,
+    pub reduced_motion: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontSizes {
+    pub large_title: f32,
+    pub title: f32,
+    pub headline: f32,
+    pub body: f32,
+    pub callout: f32,
+    pub caption: f32,
+    pub monospace: f32,
+}
+
+impl FontSizes {
+    pub fn get(&self, style: TextStyle) -> f32 {
+        match style {
+            TextStyle::LargeTitle => self.large_title,
+            TextStyle::Title => self.title,
+            TextStyle::Headline => self.headline,
+            TextStyle::Body => self.body,
+            TextStyle::Callout => self.callout,
+            TextStyle::Caption => self.caption,
+            TextStyle::Monospace => self.monospace,
+        }
+    }
+}
+
+/// Raw input for [`Backend::synthesize`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum SyntheticInput {
+    Key(Key),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Key {
+    Char(char),
+    Enter,
+    Escape,
+    Tab,
+    Backspace,
+}
+
+/// What a native widget actually shows, read back from the platform.
+/// Tests compare this with the core's state to catch backend desyncs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeState {
+    pub kind: WidgetKind,
+    pub props: Vec<Prop>,
+    pub frame: Rect,
+    pub parent: Option<NodeId>,
+    pub children: Vec<NodeId>,
+}
+
+/// An RGBA8 screenshot in physical pixels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Image {
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureError {
+    UnknownNode,
+    Unsupported,
+    Failed(String),
+}
+
+/// How backends report native events. Events are queued; the [`Ui`](crate::Ui)
+/// drains them when the backend calls [`Ui::process_events`](crate::Ui::process_events)
+/// (or right after a [`Backend::perform`]).
+#[derive(Clone, Default)]
+pub struct EventSink {
+    queue: Rc<RefCell<VecDeque<(NodeId, UiEvent)>>>,
+}
+
+impl EventSink {
+    pub fn emit(&self, id: NodeId, event: UiEvent) {
+        self.queue.borrow_mut().push_back((id, event));
+    }
+
+    pub(crate) fn pop(&self) -> Option<(NodeId, UiEvent)> {
+        self.queue.borrow_mut().pop_front()
+    }
+}
+
+pub trait Backend {
+    /// Called once when the backend is attached to a [`Ui`](crate::Ui).
+    fn init(&mut self, events: EventSink);
+
+    fn metrics(&self) -> PlatformMetrics;
+
+    /// Applies a batch of commands to the native tree.
+    fn apply(&mut self, batch: &[Command]);
+
+    /// Intrinsic size of a leaf widget. Called synchronously during layout,
+    /// after all commands of the current batch have been applied.
+    fn measure(&mut self, id: NodeId, request: MeasureRequest) -> Size;
+
+    /// Performs an accessibility action on the native control, as assistive
+    /// technology would. Resulting events go through the [`EventSink`].
+    fn perform(&mut self, id: NodeId, action: &A11yAction) -> Result<(), ActionError>;
+
+    /// Synthesizes raw user input on a native control, as close to real input
+    /// as the platform allows. Used by end-to-end tests.
+    fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError>;
+
+    fn native_state(&self, id: NodeId) -> Option<NativeState>;
+
+    /// Offscreen screenshot of a window or node.
+    fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError>;
+}

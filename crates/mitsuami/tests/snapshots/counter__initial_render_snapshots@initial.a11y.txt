@@ -1,0 +1,5 @@
+Window "mitsuami test"
+  StaticText "Count: 5"
+  Button "Increment"
+  Button "Reset"
+  StaticText "That's a lot of clicks"

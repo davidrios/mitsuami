@@ -1,0 +1,19 @@
+[package]
+name = "mitsuami-test"
+description = "Integration, end-to-end and snapshot testing for mitsuami apps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mitsuami-core.workspace = true
+mitsuami-reactive.workspace = true
+mitsuami-headless.workspace = true
+mitsuami-test-macros.workspace = true
+inventory.workspace = true
+similar.workspace = true
+
+[lints]
+workspace = true

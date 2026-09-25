@@ -1,0 +1,15 @@
+[package]
+name = "mitsuami-gtk"
+description = "GTK 4 (Linux) backend for mitsuami"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+mitsuami-core.workspace = true
+
+[lints]
+workspace = true
