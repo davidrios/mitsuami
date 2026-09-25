@@ -39,5 +39,13 @@ harness = false
 name = "conformance"
 harness = false
 
+[[test]]
+name = "tasks"
+harness = false
+
+[[test]]
+name = "services"
+harness = false
+
 [lints]
 workspace = true

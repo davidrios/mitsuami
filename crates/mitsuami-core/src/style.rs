@@ -126,8 +126,14 @@ pub fn repeat(count: usize, track: impl Into<Track>) -> Vec<Track> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Style {
     pub display: Display,
+    /// Hidden nodes act like `display: none` but keep their `display`.
+    pub hidden: bool,
     pub position: Position,
     pub direction: TextDirection,
+    /// Content may overflow along these axes and is scrolled natively.
+    /// Set by `ScrollView`; also lets it shrink below its content size.
+    pub scroll_x: bool,
+    pub scroll_y: bool,
     pub inset: Edges,
 
     pub width: Length,
@@ -164,8 +170,11 @@ impl Default for Style {
     fn default() -> Style {
         Style {
             display: Display::Flex,
+            hidden: false,
             position: Position::Relative,
             direction: TextDirection::Inherit,
+            scroll_x: false,
+            scroll_y: false,
             inset: Edges::default(),
             width: Length::Auto,
             height: Length::Auto,
@@ -300,7 +309,7 @@ impl Style {
             taffy::Rect { left: lp(left, cx), right: lp(right, cx), top: lp(e.top, cx), bottom: lp(e.bottom, cx) }
         };
         taffy::Style {
-            display: match self.display {
+            display: match if self.hidden { Display::None } else { self.display } {
                 Display::Flex => taffy::Display::Flex,
                 Display::Grid => taffy::Display::Grid,
                 Display::Block => taffy::Display::Block,
@@ -312,6 +321,11 @@ impl Style {
                 Position::Absolute => taffy::Position::Absolute,
             },
             inset: edges_lpa(&self.inset),
+            overflow: taffy::Point {
+                x: if self.scroll_x { taffy::Overflow::Scroll } else { taffy::Overflow::Visible },
+                y: if self.scroll_y { taffy::Overflow::Scroll } else { taffy::Overflow::Visible },
+            },
+            scrollbar_width: 0.0,
             size: taffy::Size { width: dimension(self.width, cx), height: dimension(self.height, cx) },
             min_size: taffy::Size { width: lpa(self.min_width, cx), height: lpa(self.min_height, cx) },
             max_size: taffy::Size { width: lpa(self.max_width, cx), height: lpa(self.max_height, cx) },
@@ -349,3 +363,22 @@ impl Style {
         }
     }
 }
+
+impl Style {
+    /// Takes no space and is not shown.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden || self.display == Display::None
+    }
+}
+
+macro_rules! static_value {
+    ($($t:ty),*) => {$(
+        impl mitsuami_reactive::IntoValue<$t> for $t {
+            fn into_value(self) -> mitsuami_reactive::Value<$t> {
+                mitsuami_reactive::Value::Static(self)
+            }
+        }
+    )*};
+}
+
+static_value!(Display, FlexDirection, Align, Justify, Position, TextDirection, GridPlacement);

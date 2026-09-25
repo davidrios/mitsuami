@@ -15,11 +15,14 @@ use crate::a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
 use crate::backend::{AvailableSpace, Backend, EventSink, MeasureRequest, NativeState, PlatformMetrics};
 use crate::command::{Command, EventValue, UiEvent};
 use crate::geometry::{Point, Rect, Size};
-use crate::style::{Display, Style, TextDirection};
+use crate::services::{Alert, MenuBar, OpenFile, SaveFile, Services, reply_future};
+use crate::style::{Style, TextDirection};
+use crate::task::{Clock, Executor, Sleep, TaskHandle};
 use crate::units::ResolveContext;
 use crate::widget::{NodeId, Prop, WidgetKind};
 
 pub(crate) type Handler = Rc<dyn Fn(&UiEvent)>;
+type Handler0 = Rc<dyn Fn()>;
 
 struct Node {
     kind: WidgetKind,
@@ -39,6 +42,8 @@ struct Node {
     frame: Rect,
     /// Windows only: content size.
     window_size: Size,
+    /// ScrollViews only: how far the content is scrolled.
+    scroll_offset: Point,
 }
 
 impl Node {
@@ -58,8 +63,12 @@ struct Inner {
     windows: Vec<NodeId>,
     styles_dirty: bool,
     resync: BTreeSet<NodeId>,
+    menu_handlers: std::collections::HashMap<u32, Handler0>,
+    menu_queue: std::collections::VecDeque<u32>,
     /// Last focus order sent, per window.
     focus_orders: BTreeMap<NodeId, Vec<NodeId>>,
+    /// The focused control of each window, as reported by the backend.
+    focused: BTreeMap<NodeId, NodeId>,
     commit_scheduler: Option<Rc<dyn Fn()>>,
     commit_scheduled: bool,
 }
@@ -69,17 +78,27 @@ struct Inner {
 #[derive(Clone)]
 pub struct Ui {
     inner: Rc<RefCell<Inner>>,
+    /// Kept apart from `inner`: tasks run while the tree is free to borrow.
+    executor: Rc<Executor>,
+    /// Kept apart too: replies may arrive at any time.
+    services: Rc<RefCell<Box<dyn Services>>>,
 }
 
 /// Non-owning [`Ui`] handle, for closures stored inside the tree itself.
 #[derive(Clone)]
 pub struct WeakUi {
     inner: Weak<RefCell<Inner>>,
+    executor: Weak<Executor>,
+    services: Weak<RefCell<Box<dyn Services>>>,
 }
 
 impl WeakUi {
     pub fn upgrade(&self) -> Option<Ui> {
-        self.inner.upgrade().map(|inner| Ui { inner })
+        Some(Ui {
+            inner: self.inner.upgrade()?,
+            executor: self.executor.upgrade()?,
+            services: self.services.upgrade()?,
+        })
     }
 }
 
@@ -101,7 +120,10 @@ impl Ui {
         let events = EventSink::default();
         backend.init(events.clone());
         let metrics = backend.metrics();
+        let services = Rc::new(RefCell::new(backend.services()));
         Ui {
+            executor: Rc::default(),
+            services,
             inner: Rc::new(RefCell::new(Inner {
                 backend,
                 events,
@@ -114,6 +136,9 @@ impl Ui {
                 styles_dirty: true,
                 resync: BTreeSet::new(),
                 focus_orders: BTreeMap::new(),
+                focused: BTreeMap::new(),
+                menu_handlers: Default::default(),
+                menu_queue: Default::default(),
                 commit_scheduler: None,
                 commit_scheduled: false,
             })),
@@ -121,7 +146,130 @@ impl Ui {
     }
 
     pub fn downgrade(&self) -> WeakUi {
-        WeakUi { inner: Rc::downgrade(&self.inner) }
+        WeakUi {
+            inner: Rc::downgrade(&self.inner),
+            executor: Rc::downgrade(&self.executor),
+            services: Rc::downgrade(&self.services),
+        }
+    }
+
+    // ---------------------------------------------------------------- tasks
+
+    pub(crate) fn executor(&self) -> &Executor {
+        &self.executor
+    }
+
+    /// Runs `future` on the UI thread, polled from [`Ui::tick`]. Unlike the
+    /// free [`spawn_local`](crate::task::spawn_local), it is not tied to a
+    /// reactive scope; cancel it with the returned handle.
+    pub fn spawn_local(&self, future: impl std::future::Future<Output = ()> + 'static) -> TaskHandle {
+        self.spawn_in(future, None)
+    }
+
+    pub(crate) fn spawn_in(
+        &self,
+        future: impl std::future::Future<Output = ()> + 'static,
+        owner: Option<mitsuami_reactive::Owner>,
+    ) -> TaskHandle {
+        let id = self.executor.spawn(Box::pin(future), owner);
+        self.changed();
+        TaskHandle::new(id, self.downgrade())
+    }
+
+    /// A future that completes after `duration` on this `Ui`'s clock.
+    pub fn sleep(&self, duration: std::time::Duration) -> Sleep {
+        Sleep::new(self.clone(), duration)
+    }
+
+    /// Replaces the clock timers use (tests install a [`ManualClock`](crate::task::ManualClock)).
+    pub fn set_clock(&self, clock: Rc<dyn Clock>) {
+        self.executor.set_clock(clock);
+    }
+
+    /// How to make the UI thread's run loop turn from any thread; called
+    /// when a task is woken (e.g. by background work finishing).
+    pub fn set_waker(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.executor.set_wake_ui(wake);
+    }
+
+    /// Time until the next timer fires (zero if overdue), for run loops to
+    /// schedule a wake-up.
+    pub fn time_to_next_timer(&self) -> Option<std::time::Duration> {
+        let now = self.executor.now();
+        self.executor.next_deadline().map(|deadline| deadline.saturating_sub(now))
+    }
+
+    // ------------------------------------------------------------- services
+
+    /// Replaces the platform services (tests install a scripted fake).
+    pub fn set_services(&self, services: Box<dyn Services>) {
+        *self.services.borrow_mut() = services;
+    }
+
+    pub fn clipboard_text(&self) -> Option<String> {
+        self.services.borrow_mut().clipboard_text()
+    }
+
+    pub fn set_clipboard_text(&self, text: &str) {
+        self.services.borrow_mut().set_clipboard_text(text);
+    }
+
+    /// Shows an alert; resolves to the index of the chosen button.
+    pub fn alert(&self, parent: Option<NodeId>, alert: Alert) -> impl std::future::Future<Output = usize> + use<> {
+        let (reply, answer) = reply_future();
+        self.services.borrow_mut().alert(parent, &alert, reply);
+        answer
+    }
+
+    /// Resolves to the chosen paths, or `None` if cancelled.
+    pub fn open_file(
+        &self,
+        parent: Option<NodeId>,
+        request: OpenFile,
+    ) -> impl std::future::Future<Output = Option<Vec<std::path::PathBuf>>> + use<> {
+        let (reply, answer) = reply_future();
+        self.services.borrow_mut().open_file(parent, &request, reply);
+        answer
+    }
+
+    pub fn save_file(
+        &self,
+        parent: Option<NodeId>,
+        request: SaveFile,
+    ) -> impl std::future::Future<Output = Option<std::path::PathBuf>> + use<> {
+        let (reply, answer) = reply_future();
+        self.services.borrow_mut().save_file(parent, &request, reply);
+        answer
+    }
+
+    /// Installs the app's menus. Reactive `enabled` states are re-sent to
+    /// the platform when they change, for as long as the current scope lives.
+    pub fn set_menu(&self, menu: MenuBar) {
+        let (data, handlers) = menu.into_parts();
+        self.inner.borrow_mut().menu_handlers = handlers
+            .into_iter()
+            .map(|(id, handler)| {
+                let handler = crate::task::in_current_scope(move |()| handler());
+                (id, Rc::new(move || handler(())) as Handler0)
+            })
+            .collect();
+        let weak = self.downgrade();
+        let activate: Rc<dyn Fn(u32)> = Rc::new(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                ui.inner.borrow_mut().menu_queue.push_back(id);
+                ui.changed();
+            }
+        });
+        let services = self.services.clone();
+        mitsuami_reactive::effect(move || {
+            let data = data();
+            services.borrow_mut().set_menu(&data, activate.clone());
+        });
+    }
+
+    /// Tasks that have not finished yet.
+    pub fn pending_tasks(&self) -> usize {
+        self.executor.task_count()
     }
 
     pub fn events(&self) -> EventSink {
@@ -190,6 +338,7 @@ impl Ui {
                     taffy,
                     frame: Rect::ZERO,
                     window_size: Size::ZERO,
+                    scroll_offset: Point::ZERO,
                 },
             );
             inner.styles_dirty = true;
@@ -249,6 +398,18 @@ impl Ui {
         self.changed();
     }
 
+    /// Edits a node's style in place (used by reactive style bindings).
+    pub fn update_style(&self, id: NodeId, f: impl FnOnce(&mut Style)) {
+        let style = {
+            let inner = self.inner.borrow();
+            let Some(node) = inner.nodes.get(&id) else { return };
+            let mut style = node.style.clone();
+            f(&mut style);
+            style
+        };
+        self.set_style(id, style);
+    }
+
     pub fn set_a11y(&self, id: NodeId, a11y: A11yProps) {
         {
             let mut inner = self.inner.borrow_mut();
@@ -273,6 +434,11 @@ impl Ui {
         self.changed();
     }
 
+    /// The control that has keyboard focus in `window`, if any.
+    pub fn focused(&self, window: NodeId) -> Option<NodeId> {
+        self.inner.borrow().focused.get(&window).copied()
+    }
+
     /// The keyboard order of a window's focusable controls, as sent to the
     /// backend.
     pub fn focus_order(&self, window: NodeId) -> Vec<NodeId> {
@@ -285,7 +451,15 @@ impl Ui {
         }
     }
 
+    /// Adds an event handler. It runs in the reactive scope that is current
+    /// now (usually the component being built), so `inject`, `spawn_local`
+    /// and friends work inside it.
     pub fn on_event(&self, id: NodeId, handler: impl Fn(&UiEvent) + 'static) {
+        let owner = mitsuami_reactive::Owner::current();
+        let handler = move |event: &UiEvent| match owner {
+            Some(owner) if owner.is_alive() => owner.with(|| handler(event)),
+            _ => handler(event),
+        };
         if let Some(node) = self.inner.borrow_mut().nodes.get_mut(&id) {
             node.handlers.push(Rc::new(handler));
         }
@@ -371,6 +545,7 @@ impl Ui {
                 inner.resync.remove(&node_id);
                 inner.windows.retain(|w| *w != node_id);
                 inner.focus_orders.remove(&node_id);
+                inner.focused.retain(|window, focused| *window != node_id && *focused != node_id);
                 if node.kind.is_native() {
                     inner.pending.push(Command::Destroy { id: node_id });
                 }
@@ -384,7 +559,20 @@ impl Ui {
     /// Drains native events and dispatches them to handlers. Handlers run in
     /// one reactive batch per event.
     pub fn process_events(&self) {
+        crate::task::with_current(self, || self.dispatch_events());
+    }
+
+    fn dispatch_events(&self) {
         loop {
+            let chosen = {
+                let mut inner = self.inner.borrow_mut();
+                let id = inner.menu_queue.pop_front();
+                id.and_then(|id| inner.menu_handlers.get(&id).cloned())
+            };
+            if let Some(handler) = chosen {
+                mitsuami_reactive::batch(|| handler());
+                continue;
+            }
             let next = self.inner.borrow().events.pop();
             let Some((id, event)) = next else { break };
             let handlers = {
@@ -425,11 +613,16 @@ impl Ui {
     /// commit itself produced new events (e.g. a window resize), until idle.
     /// Backends call this from their run loop, before it goes to sleep.
     pub fn tick(&self) {
-        const MAX_TURNS: usize = 16;
+        const MAX_TURNS: usize = 64;
         for _ in 0..MAX_TURNS {
+            self.executor.run_ready(self);
             self.process_events();
             self.commit();
-            if self.inner.borrow().events.is_empty() {
+            let idle = {
+                let inner = self.inner.borrow();
+                inner.events.is_empty() && inner.menu_queue.is_empty()
+            };
+            if idle && !self.executor.has_ready() {
                 return;
             }
         }
@@ -489,30 +682,95 @@ impl Ui {
     /// Frame in the coordinates of the node's window.
     pub fn window_frame(&self, id: NodeId) -> Option<Rect> {
         let inner = self.inner.borrow();
-        let mut frame = inner.nodes.get(&id)?.frame;
-        let mut current = inner.nodes[&id].native_parent;
-        while let Some(parent) = current {
-            let node = &inner.nodes[&parent];
-            if node.kind != WidgetKind::Window {
-                frame = frame.offset(node.frame.origin);
-            }
-            current = node.native_parent;
+        let node = inner.nodes.get(&id)?;
+        if node.kind == WidgetKind::Window {
+            return Some(node.frame);
         }
-        Some(frame)
+        Some(node.frame.offset(inner.window_origin(id)?))
+    }
+
+    /// The part of a node that can be seen: its window frame, clipped by
+    /// every enclosing scroll view and by the window. `None` if nothing is.
+    pub fn visible_rect(&self, id: NodeId) -> Option<Rect> {
+        let window = self.window_of(id)?;
+        let size = self.window_size(window)?;
+        let mut visible = self.window_frame(id)?.intersection(&Rect::new(0.0, 0.0, size.width, size.height))?;
+        let mut current = self.inner.borrow().nodes.get(&id)?.native_parent;
+        while let Some(ancestor) = current {
+            if self.kind(ancestor) == Some(WidgetKind::ScrollView) {
+                visible = visible.intersection(&self.window_frame(ancestor)?)?;
+            }
+            current = self.inner.borrow().nodes.get(&ancestor)?.native_parent;
+        }
+        Some(visible)
+    }
+
+    /// Current scroll offset of a `ScrollView`.
+    pub fn scroll_offset(&self, id: NodeId) -> Option<Point> {
+        let inner = self.inner.borrow();
+        let node = inner.nodes.get(&id)?;
+        (node.kind == WidgetKind::ScrollView).then_some(node.scroll_offset)
+    }
+
+    /// Scrolls a `ScrollView`, clamping to its content.
+    pub fn scroll_to(&self, id: NodeId, offset: Point) {
+        {
+            let mut inner = self.inner.borrow_mut();
+            let Some(offset) = inner.clamp_scroll(id, offset) else { return };
+            let node = inner.nodes.get_mut(&id).unwrap();
+            if node.scroll_offset == offset {
+                return;
+            }
+            node.scroll_offset = offset;
+            inner.pending.push(Command::ScrollTo { id, offset });
+        }
+        self.changed();
+    }
+
+    /// Scrolls every enclosing `ScrollView` just enough to show the node.
+    pub fn scroll_into_view(&self, id: NodeId) {
+        let mut target = id;
+        loop {
+            let scroll_view = {
+                let inner = self.inner.borrow();
+                let mut current = inner.nodes.get(&target).and_then(|n| n.native_parent);
+                while let Some(ancestor) = current {
+                    if inner.nodes[&ancestor].kind == WidgetKind::ScrollView {
+                        break;
+                    }
+                    current = inner.nodes[&ancestor].native_parent;
+                }
+                current
+            };
+            let Some(scroll_view) = scroll_view else { return };
+            let (Some(rect), Some(viewport)) = (self.window_frame(target), self.window_frame(scroll_view)) else {
+                return;
+            };
+            let offset = self.scroll_offset(scroll_view).unwrap_or_default();
+            // The target in content coordinates, and what currently shows.
+            let x = rect.x() - viewport.x() + offset.x;
+            let y = rect.y() - viewport.y() + offset.y;
+            let fit = |start: f32, len: f32, current: f32, visible: f32| {
+                if start < current {
+                    start
+                } else if start + len > current + visible {
+                    (start + len - visible).min(start)
+                } else {
+                    current
+                }
+            };
+            let next = Point::new(
+                fit(x, rect.width(), offset.x, viewport.width()),
+                fit(y, rect.height(), offset.y, viewport.height()),
+            );
+            self.scroll_to(scroll_view, next);
+            target = scroll_view;
+        }
     }
 
     /// The window a node is attached to, if any.
     pub fn window_of(&self, id: NodeId) -> Option<NodeId> {
-        let inner = self.inner.borrow();
-        let mut current = Some(id);
-        while let Some(node_id) = current {
-            let node = inner.nodes.get(&node_id)?;
-            if node.kind == WidgetKind::Window {
-                return Some(node_id);
-            }
-            current = node.parent;
-        }
-        None
+        self.inner.borrow().window_of(id)
     }
 
     pub fn window_size(&self, window: NodeId) -> Option<Size> {
@@ -650,7 +908,7 @@ impl Inner {
     fn focus_order(&self, window: NodeId) -> Vec<NodeId> {
         fn walk(inner: &Inner, id: NodeId, out: &mut Vec<(Option<u32>, NodeId)>) {
             let node = &inner.nodes[&id];
-            if node.style.display == Display::None {
+            if node.style.is_hidden() {
                 return;
             }
             if matches!(
@@ -792,6 +1050,17 @@ impl Inner {
                 node.props.retain(|p| p.key() != prop.key());
                 node.props.push(prop);
             }
+            UiEvent::FocusIn => {
+                if let Some(window) = self.window_of(id) {
+                    self.focused.insert(window, id);
+                }
+            }
+            UiEvent::FocusOut => self.focused.retain(|_, focused| *focused != id),
+            UiEvent::Scrolled(offset) => {
+                if let Some(node) = self.nodes.get_mut(&id) {
+                    node.scroll_offset = *offset;
+                }
+            }
             UiEvent::WindowResized(size) => {
                 if let Some(node) = self.nodes.get_mut(&id) {
                     node.window_size = *size;
@@ -811,23 +1080,65 @@ impl Inner {
         }
     }
 
-    fn window_origin(&self, id: NodeId) -> Option<Point> {
-        let mut origin = Point::ZERO;
-        let mut current = self.nodes.get(&id)?.native_parent;
-        while let Some(parent) = current {
-            let node = &self.nodes[&parent];
-            if node.kind != WidgetKind::Window {
-                origin = Point::new(origin.x + node.frame.origin.x, origin.y + node.frame.origin.y);
+    fn window_of(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let node = self.nodes.get(&node_id)?;
+            if node.kind == WidgetKind::Window {
+                return Some(node_id);
             }
-            current = node.native_parent;
+            current = node.parent;
         }
-        Some(origin)
+        None
+    }
+
+    /// Window coordinates of the point `id`'s children are positioned
+    /// from: its own top-left, moved by its scroll offset.
+    fn content_origin(&self, id: NodeId) -> Point {
+        let node = &self.nodes[&id];
+        if node.kind == WidgetKind::Window {
+            return Point::ZERO;
+        }
+        let parent = node.native_parent.map_or(Point::ZERO, |p| self.content_origin(p));
+        Point::new(
+            parent.x + node.frame.origin.x - node.scroll_offset.x,
+            parent.y + node.frame.origin.y - node.scroll_offset.y,
+        )
+    }
+
+    /// Window coordinates of the origin `id`'s frame is relative to.
+    fn window_origin(&self, id: NodeId) -> Option<Point> {
+        Some(self.nodes.get(&id)?.native_parent.map_or(Point::ZERO, |p| self.content_origin(p)))
+    }
+
+    fn clamp_scroll(&self, id: NodeId, offset: Point) -> Option<Point> {
+        let node = self.nodes.get(&id)?;
+        if node.kind != WidgetKind::ScrollView {
+            return None;
+        }
+        let axes = crate::find_prop!(node.props, ScrollAxes).unwrap_or_default();
+        let content = node.native_children.first().map_or(Size::ZERO, |c| self.nodes[c].frame.size);
+        let viewport = node.frame.size;
+        let clamp = |v: f32, content: f32, viewport: f32, enabled: bool| {
+            if enabled { v.clamp(0.0, (content - viewport).max(0.0)) } else { 0.0 }
+        };
+        Some(Point::new(
+            clamp(offset.x, content.width, viewport.width, axes.horizontal()),
+            clamp(offset.y, content.height, viewport.height, axes.vertical()),
+        ))
+    }
+
+    fn child_origin(node: &Node, frame: Rect) -> Point {
+        match node.kind {
+            WidgetKind::Window => Point::ZERO,
+            _ => Point::new(frame.origin.x - node.scroll_offset.x, frame.origin.y - node.scroll_offset.y),
+        }
     }
 
     fn inspect(&self, id: NodeId, parent_origin: Point) -> NodeInfo {
         let node = &self.nodes[&id];
         let frame = if node.kind == WidgetKind::Window { node.frame } else { node.frame.offset(parent_origin) };
-        let origin = if node.kind == WidgetKind::Window { Point::ZERO } else { frame.origin };
+        let origin = Inner::child_origin(node, frame);
         NodeInfo {
             id,
             kind: node.kind,
@@ -845,11 +1156,11 @@ impl Inner {
 
     fn a11y(&self, id: NodeId, parent_origin: Point) -> Vec<A11yNode> {
         let node = &self.nodes[&id];
-        if node.a11y.hidden || node.style.display == Display::None {
+        if node.a11y.hidden || node.style.is_hidden() {
             return Vec::new();
         }
         let frame = if node.kind == WidgetKind::Window { node.frame } else { node.frame.offset(parent_origin) };
-        let origin = if node.kind == WidgetKind::Window { Point::ZERO } else { frame.origin };
+        let origin = Inner::child_origin(node, frame);
         let children: Vec<A11yNode> = node.native_children.iter().flat_map(|c| self.a11y(*c, origin)).collect();
 
         let labelled = node.a11y.label.is_some() || node.a11y.labelled_by.is_some();
@@ -857,6 +1168,7 @@ impl Inner {
             WidgetKind::Window => Role::Window,
             WidgetKind::Container if labelled => Role::Group,
             WidgetKind::Container | WidgetKind::Fragment => Role::None,
+            WidgetKind::ScrollView => Role::ScrollArea,
             WidgetKind::Text => Role::StaticText,
             WidgetKind::Button => Role::Button,
             WidgetKind::TextInput => Role::TextField,

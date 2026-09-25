@@ -1,8 +1,11 @@
 //! Objective-C classes bridging AppKit callbacks into mitsuami events.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::rc::Rc;
 
-use mitsuami_core::{EventSink, EventValue, NodeId, Size, UiEvent, WidgetKind};
+use mitsuami_core::{EventSink, EventValue, NodeId, Point, Size, UiEvent, WidgetKind};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -10,7 +13,10 @@ use objc2_app_kit::{
     NSButton, NSColor, NSControl, NSControlStateValueOn, NSControlTextEditingDelegate, NSRectFill, NSSwitch,
     NSTextField, NSTextFieldDelegate, NSTextView, NSView, NSWindow, NSWindowDelegate,
 };
-use objc2_foundation::{NSNotification, NSPoint, NSRect, NSSize};
+use objc2_foundation::{
+    NSKeyValueObservingOptions, NSNotification, NSObjectNSKeyValueObserverRegistration, NSPoint, NSRect, NSSize,
+    NSString,
+};
 
 pub(crate) fn zero_rect() -> NSRect {
     NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0))
@@ -86,6 +92,18 @@ define_class!(
         }
     }
 
+    impl ActionTarget {
+        /// A scroll view's clip view moved (`NSViewBoundsDidChangeNotification`).
+        #[unsafe(method(scrolled:))]
+        fn scrolled(&self, notification: &NSNotification) {
+            let Some(object) = notification.object() else { return };
+            let Some(clip) = object.downcast_ref::<NSView>() else { return };
+            let origin = clip.bounds().origin;
+            let offset = Point::new(origin.x as f32, origin.y as f32);
+            self.ivars().events.emit(self.ivars().id, UiEvent::Scrolled(offset));
+        }
+    }
+
     unsafe impl NSObjectProtocol for ActionTarget {}
 
     unsafe impl NSControlTextEditingDelegate for ActionTarget {
@@ -130,9 +148,15 @@ impl ActionTarget {
     }
 }
 
+/// Native view address → node, shared between the backend and delegates.
+pub(crate) type ViewMap = Rc<RefCell<HashMap<usize, NodeId>>>;
+
 pub(crate) struct WindowIvars {
     id: NodeId,
     events: EventSink,
+    views: ViewMap,
+    /// The node we last reported as focused.
+    focused: Cell<Option<NodeId>>,
 }
 
 define_class!(
@@ -140,6 +164,32 @@ define_class!(
     #[thread_kind = MainThreadOnly]
     #[ivars = WindowIvars]
     pub(crate) struct WindowDelegate;
+
+    impl WindowDelegate {
+        /// KVO on the window's `firstResponder`: every focus change,
+        /// whether it came from a click, Tab or code.
+        #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
+        fn observe_value(
+            &self,
+            _key_path: Option<&NSString>,
+            object: Option<&AnyObject>,
+            _change: Option<&AnyObject>,
+            _context: *mut c_void,
+        ) {
+            let Some(window) = object.and_then(|o| o.downcast_ref::<NSWindow>()) else { return };
+            let now = self.focused_node(window);
+            let WindowIvars { events, focused, .. } = self.ivars();
+            let before = focused.replace(now);
+            if before != now {
+                if let Some(old) = before {
+                    events.emit(old, UiEvent::FocusOut);
+                }
+                if let Some(new) = now {
+                    events.emit(new, UiEvent::FocusIn);
+                }
+            }
+        }
+    }
 
     unsafe impl NSObjectProtocol for WindowDelegate {}
 
@@ -168,9 +218,48 @@ define_class!(
     }
 );
 
+const FIRST_RESPONDER: &str = "firstResponder";
+
 impl WindowDelegate {
-    pub(crate) fn new(mtm: MainThreadMarker, id: NodeId, events: EventSink) -> Retained<WindowDelegate> {
-        let this = WindowDelegate::alloc(mtm).set_ivars(WindowIvars { id, events });
+    pub(crate) fn new(
+        mtm: MainThreadMarker,
+        id: NodeId,
+        events: EventSink,
+        views: ViewMap,
+    ) -> Retained<WindowDelegate> {
+        let this = WindowDelegate::alloc(mtm).set_ivars(WindowIvars { id, events, views, focused: Cell::new(None) });
         unsafe { msg_send![super(this), init] }
+    }
+
+    pub(crate) fn observe_focus(&self, window: &NSWindow) {
+        unsafe {
+            window.addObserver_forKeyPath_options_context(
+                self,
+                &NSString::from_str(FIRST_RESPONDER),
+                NSKeyValueObservingOptions::New,
+                std::ptr::null_mut(),
+            );
+        }
+    }
+
+    pub(crate) fn stop_observing_focus(&self, window: &NSWindow) {
+        unsafe { window.removeObserver_forKeyPath(self, &NSString::from_str(FIRST_RESPONDER)) };
+    }
+
+    /// The node owning the first responder: the nearest known view among
+    /// the responder and its superviews. While a text field is edited, the
+    /// first responder is the window's field editor, which AppKit places
+    /// inside the field (its delegate isn't set yet when focus moves).
+    fn focused_node(&self, window: &NSWindow) -> Option<NodeId> {
+        let responder = window.firstResponder()?;
+        let views = self.ivars().views.borrow();
+        let mut view: Option<Retained<NSView>> = responder.downcast::<NSView>().ok();
+        while let Some(current) = view {
+            if let Some(id) = views.get(&(&*current as *const NSView as usize)) {
+                return Some(*id);
+            }
+            view = unsafe { current.superview() };
+        }
+        None
     }
 }

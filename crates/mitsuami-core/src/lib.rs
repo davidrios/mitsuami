@@ -9,7 +9,9 @@ pub mod command;
 mod element;
 mod flow;
 pub mod geometry;
+pub mod services;
 pub mod style;
+pub mod task;
 mod ui;
 pub mod units;
 mod view;
@@ -25,6 +27,6 @@ pub use style::{Align, Display, FlexDirection, GridPlacement, Justify, Style, Te
 pub use ui::{NodeInfo, Ui, WeakUi};
 pub use units::{Length, LengthExt, Spacing};
 pub use view::{AnyView, Children, View};
-pub use widget::{ButtonVariant, NodeId, Prop, TextStyle, WidgetKind};
+pub use widget::{ButtonVariant, NodeId, Prop, ScrollAxes, TextStyle, WidgetKind};
 
 pub use mitsuami_reactive as reactive;

@@ -1,7 +1,7 @@
 //! The data flowing between the core and a backend.
 
 use crate::a11y::A11yProps;
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::widget::{NodeId, Prop, WidgetKind};
 
 /// A change the backend must apply to the native widget tree.
@@ -59,6 +59,13 @@ pub enum Command {
         window: NodeId,
         order: Vec<NodeId>,
     },
+    /// Scrolls a `ScrollView` so `offset` (content coordinates) is at its
+    /// top-left. Already clamped by the core. Like user scrolling, it makes
+    /// the backend report `Scrolled`.
+    ScrollTo {
+        id: NodeId,
+        offset: Point,
+    },
     Focus {
         id: NodeId,
     },
@@ -84,4 +91,6 @@ pub enum UiEvent {
     WindowCloseRequested,
     /// Platform metrics changed (text size, color scheme, …).
     MetricsChanged,
+    /// A `ScrollView`'s scroll offset changed (by the user or by `ScrollTo`).
+    Scrolled(Point),
 }

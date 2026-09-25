@@ -44,7 +44,12 @@ cargo test -p mitsuami --test layout grid    # one suite, filtered
 MITSUAMI_NATIVE=1 cargo test                 # the same tests on the native backend
 MITSUAMI_SHOW_WINDOWS=1 MITSUAMI_NATIVE=1 cargo test   # …and watch them
 MITSUAMI_UPDATE_SNAPSHOTS=1 cargo test       # accept snapshot / visual baseline changes
+MITSUAMI_WAIT_MS=5000 cargo test             # longer wait for background work in assertions
 ```
+
+Tests control time (`app.advance(..)` moves the clock that `sleep` uses)
+and answer dialogs through scripted services (`app.services()`), so they
+never open real dialogs or touch your clipboard.
 
 Try the example app with `cargo run -p mitsuami --example showcase`.
 

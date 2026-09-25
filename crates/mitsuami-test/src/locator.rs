@@ -107,13 +107,11 @@ impl<'a> Locator<'a> {
         self.node().enabled
     }
 
-    /// Has a non-empty frame that overlaps its window.
+    /// Some part of it can be seen: not hidden, not zero-sized, and not
+    /// clipped away by the window or an enclosing scroll view.
     pub fn is_visible(&self) -> bool {
         let Ok(node) = self.try_node() else { return false };
-        let Some(window) = self.app.ui().window_of(node.id) else { return false };
-        let size = self.app.ui().window_size(window).unwrap_or_default();
-        let bounds = Rect::new(0.0, 0.0, size.width, size.height);
-        !node.frame.size.is_empty() && node.frame.intersection(&bounds).is_some()
+        self.app.ui().visible_rect(node.id).is_some_and(|r| !r.size.is_empty())
     }
 
     /// Has keyboard focus, according to the native widget.
@@ -171,6 +169,23 @@ impl<'a> Locator<'a> {
         self.act(A11yAction::Focus).await;
     }
 
+    /// Scrolls enclosing scroll views until the node is in view.
+    pub async fn scroll_into_view(&self) {
+        self.app.settle().await;
+        self.app.ui().scroll_into_view(self.node().id);
+        self.app.settle().await;
+    }
+
+    /// Scrolls a scroll view like a scroll wheel or trackpad would.
+    pub async fn scroll_by(&self, dx: f32, dy: f32) {
+        self.app.settle().await;
+        let node = self.node();
+        if let Err(e) = self.app.ui().synthesize(node.id, &SyntheticInput::Scroll { dx, dy }) {
+            self.fail(&format!("cannot scroll {}: {e}", self.query));
+        }
+        self.app.settle().await;
+    }
+
     pub async fn check(&self) {
         if !self.is_checked() {
             self.click().await;
@@ -195,10 +210,18 @@ impl<'a> Expectation<'a> {
         Expectation { locator }
     }
 
+    /// Settles and checks; while tasks are still running (e.g. background
+    /// work), retries until it passes or the wait timeout expires.
     async fn check(&self, ok: impl Fn(&Locator<'a>) -> Result<(), String>) {
-        self.locator.app.settle().await;
-        if let Err(message) = ok(&self.locator) {
-            self.locator.fail(&format!("expected {}: {message}", self.locator.query));
+        let app = self.locator.app;
+        let deadline = std::time::Instant::now() + crate::app::wait_timeout();
+        loop {
+            app.settle().await;
+            let Err(message) = ok(&self.locator) else { return };
+            if app.ui().pending_tasks() == 0 || std::time::Instant::now() > deadline {
+                self.locator.fail(&format!("expected {}: {message}", self.locator.query));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
     }
 

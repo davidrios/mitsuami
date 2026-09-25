@@ -231,6 +231,52 @@ async fn tab_order_updates_when_controls_come_and_go(app: TestApp) {
 }
 
 #[mitsuami_test::test]
+async fn hidden_controls_leave_the_tab_order(app: TestApp) {
+    let hide_b = signal(true);
+    app.mount(move || {
+        Column::new().children((
+            TextInput::new().a11y_label("A"),
+            TextInput::new().a11y_label("B").hidden(hide_b),
+            TextInput::new().a11y_label("C"),
+        ))
+    });
+    tab_from(&app, "A", "C").await;
+
+    hide_b.set(false);
+    app.settle().await;
+    tab_from(&app, "A", "B").await;
+}
+
+#[mitsuami_test::test]
+async fn focus_changes_are_reported(app: TestApp) {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let field = |name: &'static str, log: &Rc<RefCell<Vec<String>>>| {
+        let (f, b) = (log.clone(), log.clone());
+        TextInput::new()
+            .a11y_label(name)
+            .on_focus(move || f.borrow_mut().push(format!("focus {name}")))
+            .on_blur(move || b.borrow_mut().push(format!("blur {name}")))
+    };
+    let (a, b) = (field("A", &log), field("B", &log));
+    app.mount(move || Column::new().children((a, b)));
+
+    app.get_by_label("A").focus().await;
+    app.get_by_label("A").press(Key::Tab).await;
+
+    assert_eq!(*log.borrow(), ["focus A", "blur A", "focus B"]);
+    assert_eq!(app.ui().focused(app.window()), Some(app.get_by_label("B").id()));
+}
+
+#[mitsuami_test::test]
+async fn typing_into_a_field_focuses_it(app: TestApp) {
+    let focused = signal(false);
+    app.mount(move || TextInput::new().a11y_label("Field").on_focus(move || focused.set(true)));
+    app.get_by_label("Field").type_text("x").await;
+    assert!(focused.get_untracked());
+    assert_eq!(app.ui().focused(app.window()), Some(app.get_by_label("Field").id()));
+}
+
+#[mitsuami_test::test]
 async fn disabled_controls_refuse_actions(app: TestApp) {
     app.mount(|| {
         Column::new().children((
@@ -355,6 +401,120 @@ async fn destroyed_subtrees_release_their_native_widgets(app: TestApp) {
     let log = app.take_command_log();
     let destroyed = log.iter().filter(|c| matches!(c, Command::Destroy { .. })).count();
     assert_eq!(destroyed, 5);
+}
+
+// -------------------------------------------------------------- scrolling
+
+fn rows(count: usize) -> Vec<Container> {
+    (0..count).map(|i| Container::new().height(20).test_id(format!("row{i}"))).collect()
+}
+
+fn scroll_content(app: &TestApp, scroller: &str) -> Rect {
+    let id = app.get_by_test_id(scroller).id();
+    let content = app.ui().native_children(id)[0];
+    app.ui().frame(content).unwrap()
+}
+
+#[mitsuami_test::test]
+async fn scroll_view_content_overflows_its_viewport(app: TestApp) {
+    app.mount(|| ScrollView::new().height(100).test_id("scroller").children(rows(20)));
+
+    assert_eq!(app.get_by_test_id("scroller").frame().height(), 100.0);
+    assert_eq!(scroll_content(&app, "scroller").height(), 400.0);
+    assert!(app.get_by_test_id("row0").is_visible());
+    assert!(!app.get_by_test_id("row10").is_visible(), "clipped by the scroll view");
+    assert!(app.a11y_tree().walk().iter().any(|n| n.role == Role::ScrollArea));
+}
+
+#[mitsuami_test::test]
+async fn scroll_into_view_reveals_content(app: TestApp) {
+    let seen = signal(None);
+    app.mount(move || {
+        ScrollView::new().height(100).test_id("scroller").on_scroll(move |p| seen.set(Some(p))).children(rows(20))
+    });
+
+    app.get_by_test_id("row15").scroll_into_view().await;
+
+    // Row 15 spans 300..320; the smallest scroll that shows it is 220.
+    let scroller = app.get_by_test_id("scroller").id();
+    assert_eq!(app.ui().scroll_offset(scroller), Some(Point::new(0.0, 220.0)));
+    assert_eq!(seen.get_untracked(), Some(Point::new(0.0, 220.0)));
+    assert!(app.get_by_test_id("row15").is_visible());
+    assert!(!app.get_by_test_id("row0").is_visible());
+}
+
+#[mitsuami_test::test]
+async fn scrolling_moves_content_and_clamps(app: TestApp) {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let log = seen.clone();
+    app.mount(move || {
+        Column::new().padding(10).child(
+            ScrollView::new()
+                .height(100)
+                .test_id("scroller")
+                .on_scroll(move |p| log.borrow_mut().push(p.y))
+                .children(rows(20)),
+        )
+    });
+    let scroller = app.get_by_test_id("scroller");
+
+    scroller.scroll_by(0.0, 50.0).await;
+    // Window coordinates follow the scroll: the scroll view starts at y=10.
+    assert_eq!(app.get_by_test_id("row0").frame().y(), 10.0 - 50.0);
+
+    scroller.scroll_by(0.0, 10_000.0).await;
+    scroller.scroll_by(0.0, -10_000.0).await;
+
+    assert_eq!(*seen.borrow(), [50.0, 300.0, 0.0], "clamped to 0..=content-viewport");
+}
+
+#[mitsuami_test::test]
+async fn horizontal_scroll_views_scroll_sideways_only(app: TestApp) {
+    app.mount(|| {
+        ScrollView::horizontal()
+            .width(100)
+            .height(40)
+            .test_id("scroller")
+            .children((0..10).map(|i| Container::new().width(30).test_id(format!("col{i}"))).collect::<Vec<_>>())
+    });
+    assert_eq!(scroll_content(&app, "scroller").size, Size::new(300.0, 40.0));
+
+    app.get_by_test_id("scroller").scroll_by(1000.0, 1000.0).await;
+
+    let scroller = app.get_by_test_id("scroller").id();
+    assert_eq!(app.ui().scroll_offset(scroller), Some(Point::new(200.0, 0.0)));
+    assert!(app.get_by_test_id("col9").is_visible());
+}
+
+#[mitsuami_test::test]
+async fn scroll_views_fill_the_space_they_are_given(app: TestApp) {
+    app.mount(|| {
+        // As in CSS, a scroll container's natural size is its content, so
+        // siblings that must keep their size opt out of shrinking.
+        Column::new().height(300).children((
+            Container::new().height(50).shrink(0.0),
+            ScrollView::new().grow(1.0).test_id("scroller").children(rows(50)),
+        ))
+    });
+    assert_eq!(app.get_by_test_id("scroller").frame(), Rect::new(0.0, 50.0, 800.0, 250.0));
+    assert_eq!(scroll_content(&app, "scroller").height(), 1000.0);
+}
+
+#[mitsuami_test::test]
+async fn scrolled_content_renders_at_its_offset(app: TestApp) {
+    app.mount(|| {
+        Column::new().padding(20).child(
+            ScrollView::new()
+                .height(120)
+                .width(240)
+                .test_id("scroller")
+                .children((0..30).map(|i| Text::new(format!("Line {i}"))).collect::<Vec<_>>()),
+        )
+    });
+    app.get_by_text("Line 12").scroll_into_view().await;
+    app.expect(by_text("Line 12")).to_be_visible().await;
+    app.expect(by_text("Line 0")).to_be_hidden().await;
+    app.assert_visual_snapshot("scrolled");
 }
 
 // ------------------------------------------------------------ windows

@@ -13,8 +13,12 @@ mod app;
 mod backend;
 #[cfg(target_os = "macos")]
 mod classes;
+#[cfg(target_os = "macos")]
+mod services;
 
 #[cfg(target_os = "macos")]
 pub use app::{init_for_tests, run};
 #[cfg(target_os = "macos")]
 pub use backend::{AppKitBackend, AppKitHandle, BackendOptions};
+#[cfg(target_os = "macos")]
+pub use services::AppKitServices;

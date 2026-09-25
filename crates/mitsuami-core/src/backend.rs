@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::a11y::{A11yAction, ActionError};
 use crate::command::{Command, UiEvent};
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::units::SpacingScale;
 use crate::widget::{NodeId, Prop, TextStyle, WidgetKind};
 
@@ -68,6 +68,12 @@ impl FontSizes {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SyntheticInput {
     Key(Key),
+    /// Scroll-wheel / trackpad scroll over a `ScrollView`, in logical units
+    /// (positive = towards the end of the content).
+    Scroll {
+        dx: f32,
+        dy: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +96,8 @@ pub struct NativeState {
     pub children: Vec<NodeId>,
     /// Has keyboard focus (for text fields: is being edited).
     pub focused: bool,
+    /// `ScrollView`s only: the current scroll offset.
+    pub scroll_offset: Option<Point>,
 }
 
 /// An RGBA8 screenshot in physical pixels.
@@ -155,4 +163,8 @@ pub trait Backend {
 
     /// Offscreen screenshot of a window or node.
     fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError>;
+
+    /// The platform's clipboard, dialogs and menus. Called once, when the
+    /// backend is attached; tests may replace the result.
+    fn services(&self) -> Box<dyn crate::services::Services>;
 }

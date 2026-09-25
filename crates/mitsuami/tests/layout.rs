@@ -6,7 +6,7 @@ use mitsuami::core::backend::PlatformMetrics;
 use mitsuami::prelude::*;
 use mitsuami_test::prelude::*;
 
-fn boxed(id: &str, width: impl Into<Length>, height: impl Into<Length>) -> Container {
+fn boxed(id: &str, width: impl IntoValue<Length>, height: impl IntoValue<Length>) -> Container {
     Container::new().size(width, height).test_id(id)
 }
 
@@ -175,6 +175,64 @@ async fn hidden_nodes_take_no_space_and_leave_the_a11y_tree(app: TestApp) {
     app.mount(|| Column::new().children((Text::new("Secret").hidden(true), boxed("after", 10, 10))));
     assert_eq!(frame_of(&app, "after").await.origin, Point::new(0.0, 0.0));
     app.expect(by_text("Secret")).not_to_exist().await;
+}
+
+#[mitsuami_test::test]
+async fn styles_follow_signals(app: TestApp) {
+    let wide = signal(false);
+    let gap = signal(0.px());
+    app.mount(move || {
+        Row::new()
+            .align(Align::Start)
+            .gap(gap)
+            .children((boxed("a", move || if wide.get() { 200.px() } else { 100.px() }, 20), boxed("b", 50, 20)))
+    });
+    assert_eq!(frame_of(&app, "a").await.width(), 100.0);
+    assert_eq!(frame_of(&app, "b").await.x(), 100.0);
+
+    wide.set(true);
+    gap.set(10.px());
+
+    assert_eq!(frame_of(&app, "a").await.width(), 200.0);
+    assert_eq!(frame_of(&app, "b").await.x(), 210.0);
+}
+
+#[mitsuami_test::test]
+async fn unhiding_restores_the_original_display(app: TestApp) {
+    let hidden = signal(true);
+    app.mount(move || {
+        Column::new().children((
+            Grid::new()
+                .test_id("grid")
+                .columns([50.px(), 50.px()])
+                .hidden(hidden)
+                .children((boxed("left", Length::Auto, 20), boxed("right", Length::Auto, 20))),
+            boxed("after", 10, 10),
+        ))
+    });
+    assert_eq!(frame_of(&app, "after").await.y(), 0.0);
+
+    hidden.set(false);
+
+    // Still a grid: the two cells sit side by side.
+    assert_eq!(frame_of(&app, "right").await, Rect::new(50.0, 0.0, 50.0, 20.0));
+    assert_eq!(frame_of(&app, "after").await.y(), 20.0);
+}
+
+#[mitsuami_test::test]
+async fn style_with_edits_several_fields_reactively(app: TestApp) {
+    let compact = signal(false);
+    app.mount(move || {
+        Column::new().align(Align::Start).child(boxed("card", 100, 40).style_with(move |s| {
+            let pad = if compact.get() { 4.0 } else { 16.0 };
+            s.margin = mitsuami::core::style::Edges::all(pad.px());
+        }))
+    });
+    assert_eq!(frame_of(&app, "card").await.origin, Point::new(16.0, 16.0));
+
+    compact.set(true);
+
+    assert_eq!(frame_of(&app, "card").await.origin, Point::new(4.0, 4.0));
 }
 
 mitsuami_test::main!();

@@ -32,6 +32,7 @@ mod visual;
 pub use app::TestApp;
 pub use driver::Mode;
 pub use locator::{Expectation, Locator};
+pub use mitsuami_headless::{FakeServicesHandle, Pending, PendingAlert, PendingOpen, PendingSave};
 pub use mitsuami_test_macros::test;
 pub use query::{Query, by_label, by_role, by_test_id, by_text};
 

@@ -10,7 +10,9 @@ use mitsuami_core::backend::{
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::units::SpacingScale;
-use mitsuami_core::{ButtonVariant, Command, EventValue, NodeId, Prop, Rect, Size, TextStyle, UiEvent, WidgetKind};
+use mitsuami_core::{
+    ButtonVariant, Command, EventValue, NodeId, Point, Prop, Rect, ScrollAxes, Size, TextStyle, UiEvent, WidgetKind,
+};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{MainThreadMarker, MainThreadOnly, Message, msg_send, sel};
@@ -19,12 +21,12 @@ use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSBitmapFormat, NSButton, NSControl, NSControlStateValueOff,
     NSControlStateValueOn, NSFont, NSFontTextStyle, NSFontTextStyleBody, NSFontTextStyleCallout,
     NSFontTextStyleCaption1, NSFontTextStyleHeadline, NSFontTextStyleLargeTitle, NSFontTextStyleTitle1,
-    NSFontWeightRegular, NSScreen, NSStandardKeyBindingResponding, NSSwitch, NSTextField, NSView, NSWindow,
-    NSWindowOrderingMode, NSWindowStyleMask, NSWorkspace,
+    NSFontWeightRegular, NSScreen, NSScrollView, NSStandardKeyBindingResponding, NSSwitch, NSTextField, NSView,
+    NSViewBoundsDidChangeNotification, NSWindow, NSWindowOrderingMode, NSWindowStyleMask, NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSDictionary, NSPoint, NSRange, NSRect, NSSize, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSNotificationCenter, NSPoint, NSRange, NSRect, NSSize, NSString};
 
-use crate::classes::{ActionTarget, HostView, WindowDelegate};
+use crate::classes::{ActionTarget, HostView, ViewMap, WindowDelegate};
 
 /// How the backend behaves; apps and tests want different things.
 #[derive(Clone, Debug)]
@@ -37,11 +39,18 @@ pub struct BackendOptions {
     /// Force the light appearance, so captures are comparable across
     /// machines regardless of system settings.
     pub force_light_appearance: bool,
+    /// Use a private pasteboard instead of the system clipboard (tests).
+    pub private_clipboard: bool,
 }
 
 impl Default for BackendOptions {
     fn default() -> Self {
-        BackendOptions { show_windows: true, record_commands: false, force_light_appearance: false }
+        BackendOptions {
+            show_windows: true,
+            record_commands: false,
+            force_light_appearance: false,
+            private_clipboard: false,
+        }
     }
 }
 
@@ -53,6 +62,7 @@ enum Widget {
     Button(Retained<NSButton>),
     Checkbox(Retained<NSButton>),
     Switch(Retained<NSSwitch>),
+    Scroll(Retained<NSScrollView>),
 }
 
 impl Widget {
@@ -63,6 +73,7 @@ impl Widget {
             Widget::Label(v) | Widget::Field(v) => v,
             Widget::Button(v) | Widget::Checkbox(v) => v,
             Widget::Switch(v) => v,
+            Widget::Scroll(v) => v,
         }
     }
 
@@ -71,7 +82,7 @@ impl Widget {
             Widget::Label(v) | Widget::Field(v) => Some(v),
             Widget::Button(v) | Widget::Checkbox(v) => Some(v),
             Widget::Switch(v) => Some(v),
-            Widget::Window { .. } | Widget::Host(_) => None,
+            Widget::Window { .. } | Widget::Host(_) | Widget::Scroll(_) => None,
         }
     }
 }
@@ -91,7 +102,9 @@ struct State {
     mtm: MainThreadMarker,
     options: BackendOptions,
     nodes: HashMap<NodeId, Node>,
-    by_view: HashMap<usize, NodeId>,
+    /// Native view (by address) → node. Shared with window delegates, which
+    /// resolve the first responder; only ever borrowed briefly.
+    by_view: ViewMap,
     events: EventSink,
     log: Vec<Command>,
     pending_show: Vec<NodeId>,
@@ -174,7 +187,7 @@ impl AppKitBackend {
                 mtm,
                 options,
                 nodes: HashMap::new(),
-                by_view: HashMap::new(),
+                by_view: ViewMap::default(),
                 events: EventSink::default(),
                 log: Vec::new(),
                 pending_show: Vec::new(),
@@ -241,9 +254,15 @@ impl AppKitHandle {
 impl State {
     fn create(&mut self, id: NodeId, kind: WidgetKind, command: &Command) {
         let mtm = self.mtm;
-        let target =
-            matches!(kind, WidgetKind::Button | WidgetKind::Checkbox | WidgetKind::Switch | WidgetKind::TextInput)
-                .then(|| ActionTarget::new(mtm, id, kind, self.events.clone()));
+        let target = matches!(
+            kind,
+            WidgetKind::Button
+                | WidgetKind::Checkbox
+                | WidgetKind::Switch
+                | WidgetKind::TextInput
+                | WidgetKind::ScrollView
+        )
+        .then(|| ActionTarget::new(mtm, id, kind, self.events.clone()));
         let action = Some(sel!(fire:));
         let target_obj: Option<&AnyObject> = target.as_deref().map(|t| t.as_ref());
         let widget = match kind {
@@ -267,8 +286,9 @@ impl State {
                 window.setAutorecalculatesKeyViewLoop(false);
                 let host = HostView::new(mtm, true);
                 window.setContentView(Some(&host));
-                let delegate = WindowDelegate::new(mtm, id, self.events.clone());
+                let delegate = WindowDelegate::new(mtm, id, self.events.clone(), self.by_view.clone());
                 window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+                delegate.observe_focus(&window);
                 if self.options.force_light_appearance {
                     window.setAppearance(NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }).as_deref());
                 }
@@ -309,6 +329,25 @@ impl State {
                 }
                 Widget::Field(field)
             }
+            WidgetKind::ScrollView => {
+                let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), crate::classes::zero_rect());
+                scroll.setDrawsBackground(false);
+                scroll.setAutohidesScrollers(true);
+                let clip = scroll.contentView();
+                clip.setPostsBoundsChangedNotifications(true);
+                if let Some(target) = &target {
+                    // SAFETY: the target is removed as an observer when the node is destroyed.
+                    unsafe {
+                        NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
+                            target,
+                            sel!(scrolled:),
+                            Some(NSViewBoundsDidChangeNotification),
+                            Some(&clip),
+                        );
+                    }
+                }
+                Widget::Scroll(scroll)
+            }
             WidgetKind::Fragment => violation(command, "fragments are core-only"),
         };
         // The core assumes new nodes start with a zero frame and only sends
@@ -316,7 +355,7 @@ impl State {
         if !matches!(widget, Widget::Window { .. }) {
             widget.view().setFrame(crate::classes::zero_rect());
         }
-        self.by_view.insert(key(widget.view()), id);
+        self.by_view.borrow_mut().insert(key(widget.view()), id);
         self.nodes.insert(id, Node { kind, widget, _target: target, parent: None, text_style: None, variant: None });
     }
 
@@ -344,6 +383,10 @@ impl State {
             (Prop::TextStyle(style), w) if w.control().is_some() => {
                 w.control().unwrap().setFont(Some(&font(*style)));
                 node.text_style = Some(*style);
+            }
+            (Prop::ScrollAxes(axes), Widget::Scroll(scroll)) => {
+                scroll.setHasVerticalScroller(axes.vertical());
+                scroll.setHasHorizontalScroller(axes.horizontal());
             }
             (Prop::Variant(variant), Widget::Button(b)) => {
                 b.setKeyEquivalent(&ns(if *variant == ButtonVariant::Primary { "\r" } else { "" }));
@@ -380,6 +423,14 @@ impl State {
                 if self.nodes[child].parent.is_some() {
                     violation(command, "child is still attached");
                 }
+                if let Widget::Scroll(scroll) = &self.nodes[parent].widget {
+                    if scroll.documentView().is_some() {
+                        violation(command, "a ScrollView has a single native child (its content)");
+                    }
+                    scroll.setDocumentView(Some(&child_view));
+                    self.nodes.get_mut(child).unwrap().parent = Some(*parent);
+                    return;
+                }
                 let siblings = parent_view.subviews();
                 if *index >= siblings.len() {
                     parent_view.addSubview(&child_view);
@@ -397,16 +448,23 @@ impl State {
                 if self.nodes.get(child).and_then(|n| n.parent) != Some(*parent) {
                     violation(command, "not a child of this parent");
                 }
-                self.view(*child, command).removeFromSuperview();
+                match &self.nodes[parent].widget {
+                    Widget::Scroll(scroll) => scroll.setDocumentView(None),
+                    _ => self.view(*child, command).removeFromSuperview(),
+                }
                 self.nodes.get_mut(child).unwrap().parent = None;
             }
             Command::Destroy { id } => {
                 let Some(node) = self.nodes.remove(id) else { violation(command, "node does not exist") };
-                self.by_view.remove(&key(node.widget.view()));
+                self.by_view.borrow_mut().remove(&key(node.widget.view()));
                 self.pending_show.retain(|w| w != id);
                 self.focus_orders.remove(id);
+                if let Some(target) = &node._target {
+                    unsafe { NSNotificationCenter::defaultCenter().removeObserver(target) };
+                }
                 match &node.widget {
-                    Widget::Window { window, .. } => {
+                    Widget::Window { window, _delegate, .. } => {
+                        _delegate.stop_observing_focus(window);
                         window.setDelegate(None);
                         window.close();
                     }
@@ -457,6 +515,10 @@ impl State {
                 ns_window.setInitialFirstResponder(views.first().map(|v| &**v));
                 self.focus_orders.insert(*window, order.clone());
             }
+            Command::ScrollTo { id, offset } => match self.nodes.get(id).map(|n| &n.widget) {
+                Some(Widget::Scroll(scroll)) => scroll_to(scroll, NSPoint::new(offset.x as f64, offset.y as f64)),
+                _ => violation(command, "not a ScrollView"),
+            },
             Command::Focus { id } => {
                 let view = self.view(*id, command);
                 if let Some(window) = view.window() {
@@ -465,6 +527,13 @@ impl State {
             }
         }
     }
+}
+
+/// Scrolls like the user would, so the clip view reports the change.
+fn scroll_to(scroll: &NSScrollView, origin: NSPoint) {
+    let clip = scroll.contentView();
+    clip.scrollToPoint(origin);
+    scroll.reflectScrolledClipView(&clip);
 }
 
 fn focused(widget: &Widget) -> bool {
@@ -526,7 +595,7 @@ impl Backend for AppKitBackend {
             }
             Widget::Button(v) | Widget::Checkbox(v) => ceil_size(v.intrinsicContentSize()),
             Widget::Switch(v) => ceil_size(v.intrinsicContentSize()),
-            Widget::Window { .. } | Widget::Host(_) => Size::ZERO,
+            Widget::Window { .. } | Widget::Host(_) | Widget::Scroll(_) => Size::ZERO,
         };
         Size::new(request.known_width.unwrap_or(natural.width), request.known_height.unwrap_or(natural.height))
     }
@@ -560,7 +629,7 @@ impl Backend for AppKitBackend {
                 if !window.makeFirstResponder(Some(&widget_view)) {
                     return Err(ActionError::Unsupported);
                 }
-                events.emit(id, UiEvent::FocusIn);
+                // The window delegate reports the focus change.
             }
             (A11yAction::ScrollIntoView, _) => {}
             _ => return Err(ActionError::Unsupported),
@@ -569,7 +638,26 @@ impl Backend for AppKitBackend {
     }
 
     fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError> {
-        let SyntheticInput::Key(key) = input;
+        if let SyntheticInput::Scroll { dx, dy } = input {
+            let scroll = match self.state.borrow().nodes.get(&id).map(|n| &n.widget) {
+                Some(Widget::Scroll(scroll)) => scroll.clone(),
+                Some(_) => return Err(ActionError::Unsupported),
+                None => return Err(ActionError::UnknownNode),
+            };
+            let clip = scroll.contentView();
+            let visible = clip.bounds();
+            let content = scroll.documentView().map_or(visible.size, |d| d.frame().size);
+            let clamp = |v: f64, content: f64, visible: f64, on: bool| {
+                if on { v.clamp(0.0, (content - visible).max(0.0)) } else { 0.0 }
+            };
+            let origin = NSPoint::new(
+                clamp(visible.origin.x + *dx as f64, content.width, visible.size.width, scroll.hasHorizontalScroller()),
+                clamp(visible.origin.y + *dy as f64, content.height, visible.size.height, scroll.hasVerticalScroller()),
+            );
+            scroll_to(&scroll, origin);
+            return Ok(());
+        }
+        let SyntheticInput::Key(key) = input else { unreachable!() };
         let (view, kind) = {
             let state = self.state.borrow();
             let node = state.nodes.get(&id).ok_or(ActionError::UnknownNode)?;
@@ -641,6 +729,13 @@ impl Backend for AppKitBackend {
                 }
                 props.push(checked(s.state()));
             }
+            Widget::Scroll(scroll) => {
+                props.push(Prop::ScrollAxes(match (scroll.hasHorizontalScroller(), scroll.hasVerticalScroller()) {
+                    (true, true) => ScrollAxes::Both,
+                    (true, false) => ScrollAxes::Horizontal,
+                    _ => ScrollAxes::Vertical,
+                }))
+            }
             Widget::Host(_) => {}
         }
         if let Some(control) = node.widget.control() {
@@ -650,7 +745,17 @@ impl Backend for AppKitBackend {
         props.extend(node.variant.map(Prop::Variant));
         let view = node.widget.view();
         let f = view.frame();
-        let children = view.subviews().iter().filter_map(|v| state.by_view.get(&key(&v)).copied()).collect();
+        let by_view = state.by_view.borrow();
+        let (children, scroll_offset) = match &node.widget {
+            Widget::Scroll(scroll) => {
+                let origin = scroll.contentView().bounds().origin;
+                (
+                    scroll.documentView().and_then(|d| by_view.get(&key(&d)).copied()).into_iter().collect(),
+                    Some(Point::new(origin.x as f32, origin.y as f32)),
+                )
+            }
+            _ => (view.subviews().iter().filter_map(|v| by_view.get(&key(&v)).copied()).collect(), None),
+        };
         Some(NativeState {
             kind: node.kind,
             props,
@@ -658,7 +763,13 @@ impl Backend for AppKitBackend {
             parent: node.parent,
             children,
             focused: focused(&node.widget),
+            scroll_offset,
         })
+    }
+
+    fn services(&self) -> Box<dyn mitsuami_core::services::Services> {
+        let state = self.state.borrow();
+        Box::new(crate::services::AppKitServices::new(state.mtm, self.handle(), state.options.private_clipboard))
     }
 
     fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError> {

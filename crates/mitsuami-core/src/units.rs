@@ -140,3 +140,34 @@ impl Length {
         }
     }
 }
+
+impl From<i32> for Length {
+    fn from(v: i32) -> Length {
+        Length::Px(v as f32)
+    }
+}
+
+impl From<f32> for Length {
+    fn from(v: f32) -> Length {
+        Length::Px(v)
+    }
+}
+
+/// Plain numbers are logical pixels: `.width(200)`.
+macro_rules! into_length_value {
+    ($($t:ty => $e:expr),*) => {$(
+        impl mitsuami_reactive::IntoValue<Length> for $t {
+            fn into_value(self) -> mitsuami_reactive::Value<Length> {
+                let f: fn($t) -> Length = $e;
+                mitsuami_reactive::Value::Static(f(self))
+            }
+        }
+    )*};
+}
+
+into_length_value!(
+    Length => |l| l,
+    Spacing => Length::Token,
+    i32 => |v| Length::Px(v as f32),
+    f32 => Length::Px
+);

@@ -1,7 +1,7 @@
 //! Starting an app on the native backend of the target platform.
 
 use mitsuami_core::{AnyView, Size, Ui, UiEvent, View};
-use mitsuami_reactive::Owner;
+use mitsuami_reactive::{Owner, provide};
 
 struct WindowSpec {
     title: String,
@@ -39,8 +39,13 @@ impl App {
     pub fn run(self) {
         let windows = self.windows;
         let setup = move |ui: &Ui| {
+            // The app scope makes the Ui available to every component
+            // (`inject::<Ui>()`, `spawn_local`, `sleep`); it lives as long
+            // as the app.
+            let app = Owner::new_root();
+            app.with(|| provide(ui.clone()));
             for spec in windows {
-                open(ui, spec);
+                open(ui, app, spec);
             }
         };
         #[cfg(target_os = "macos")]
@@ -53,10 +58,11 @@ impl App {
     }
 }
 
-fn open(ui: &Ui, spec: WindowSpec) {
+fn open(ui: &Ui, app: Owner, spec: WindowSpec) {
     let window = ui.create_window(spec.title, spec.size);
-    // Each window owns its reactive state; closing it disposes everything.
-    let owner = Owner::new_root();
+    // Each window owns its reactive state; closing it disposes everything,
+    // including the tasks it started.
+    let owner = app.child();
     let root = owner.with(|| (spec.content)().build(ui));
     ui.append_child(window, root);
     let weak = ui.downgrade();

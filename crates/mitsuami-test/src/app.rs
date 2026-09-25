@@ -1,7 +1,11 @@
 use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use mitsuami_core::task::ManualClock;
 
 use mitsuami_core::{A11yNode, Command, NodeId, NodeInfo, Role, Size, Ui, View};
-use mitsuami_headless::HeadlessHandle;
+use mitsuami_headless::{FakeServices, FakeServicesHandle, HeadlessHandle};
 use mitsuami_reactive::Owner;
 
 use crate::driver::{Driver, Mode};
@@ -19,10 +23,19 @@ pub(crate) struct TestContext {
 /// The app under test: a [`Ui`] with one window, driven by the test.
 pub struct TestApp {
     ui: Ui,
+    clock: Rc<ManualClock>,
+    services: FakeServicesHandle,
     driver: Driver,
     owner: Owner,
     window: Cell<Option<NodeId>>,
     pub(crate) context: TestContext,
+}
+
+/// How long assertions and `wait_for_tasks` wait for background work.
+/// `MITSUAMI_WAIT_MS` overrides the default of 2 seconds.
+pub(crate) fn wait_timeout() -> Duration {
+    let ms = std::env::var("MITSUAMI_WAIT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000);
+    Duration::from_millis(ms)
 }
 
 /// Default window content size for tests.
@@ -31,7 +44,43 @@ pub const DEFAULT_WINDOW: Size = Size::new(800.0, 600.0);
 impl TestApp {
     pub(crate) fn new(context: TestContext, mode: Mode) -> TestApp {
         let (ui, driver) = Driver::create(mode);
-        TestApp { ui, driver, owner: Owner::new_root(), window: Cell::new(None), context }
+        // Tests own time: timers only fire when the test advances the clock.
+        let clock = Rc::new(ManualClock::default());
+        ui.set_clock(clock.clone());
+        // Never real dialogs or the real clipboard, even on native backends.
+        let (fake, services) = FakeServices::new();
+        ui.set_services(Box::new(fake));
+        let owner = Owner::new_root();
+        owner.with(|| mitsuami_reactive::provide(ui.clone()));
+        TestApp { ui, clock, services, driver, owner, window: Cell::new(None), context }
+    }
+
+    /// The scripted platform services: answer dialogs, inspect the
+    /// clipboard and the menus, choose menu items.
+    pub fn services(&self) -> &FakeServicesHandle {
+        &self.services
+    }
+
+    /// Moves the test clock forward, firing due timers, then settles.
+    pub async fn advance(&self, by: Duration) {
+        self.clock.advance(by);
+        self.settle().await;
+    }
+
+    /// Settles repeatedly until no tasks are left (background work included),
+    /// or fails after the wait timeout.
+    pub async fn wait_for_tasks(&self) {
+        let deadline = Instant::now() + wait_timeout();
+        loop {
+            self.settle_now();
+            if self.ui.pending_tasks() == 0 {
+                return;
+            }
+            if Instant::now() > deadline {
+                panic!("{} task(s) still running after {:?}", self.ui.pending_tasks(), wait_timeout());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     pub fn ui(&self) -> &Ui {
@@ -104,8 +153,9 @@ impl TestApp {
     }
 
     pub(crate) fn settle_now(&self) {
-        self.ui.process_events();
-        self.ui.commit();
+        // The same loop the run loop uses: events a commit produces (a
+        // resize, a scroll, focus moving) are handled before we look.
+        self.ui.tick();
         self.check_mirror();
     }
 
@@ -217,6 +267,23 @@ impl TestApp {
                 let frame = self.ui.frame(node.id).unwrap_or_default();
                 assert_eq!(native.frame, frame, "backend desync: frame of {} {}", node.kind.name(), node.id);
             }
+            assert_eq!(
+                native.scroll_offset,
+                self.ui.scroll_offset(node.id),
+                "backend desync: scroll offset of {} {}",
+                node.kind.name(),
+                node.id
+            );
+            let core_focused = self.ui.focused(window) == Some(node.id);
+            assert_eq!(
+                native.focused,
+                core_focused,
+                "backend desync: {} {} is {}focused natively but {}focused in the core (missing focus event?)",
+                node.kind.name(),
+                node.id,
+                if native.focused { "" } else { "not " },
+                if core_focused { "" } else { "not " },
+            );
             for prop in &node.props {
                 assert!(
                     native.props.contains(prop),

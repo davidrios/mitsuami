@@ -38,6 +38,9 @@ pub enum WidgetKind {
     Checkbox,
     Switch,
     /// A custom widget registered by name (see `CustomWidget`, M4).
+    /// A native scroll container. It has exactly one native child, the
+    /// content, which the core lays out and may be larger than the viewport.
+    ScrollView,
     Custom(&'static str),
     /// A raw native view supplied by app code (see `NativeView`, M4).
     Native,
@@ -50,13 +53,14 @@ impl WidgetKind {
 
     /// Containers lay out children; everything else is measured by the backend.
     pub fn is_container(self) -> bool {
-        matches!(self, WidgetKind::Window | WidgetKind::Container)
+        matches!(self, WidgetKind::Window | WidgetKind::Container | WidgetKind::ScrollView)
     }
 
     pub fn name(self) -> &'static str {
         match self {
             WidgetKind::Window => "Window",
             WidgetKind::Container => "Container",
+            WidgetKind::ScrollView => "ScrollView",
             WidgetKind::Fragment => "Fragment",
             WidgetKind::Text => "Text",
             WidgetKind::Button => "Button",
@@ -92,6 +96,25 @@ pub enum ButtonVariant {
     Plain,
 }
 
+/// Scrolling directions of a `ScrollView`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ScrollAxes {
+    #[default]
+    Vertical,
+    Horizontal,
+    Both,
+}
+
+impl ScrollAxes {
+    pub fn horizontal(self) -> bool {
+        matches!(self, ScrollAxes::Horizontal | ScrollAxes::Both)
+    }
+
+    pub fn vertical(self) -> bool {
+        matches!(self, ScrollAxes::Vertical | ScrollAxes::Both)
+    }
+}
+
 /// A property of a native widget. Which ones apply depends on the kind.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prop {
@@ -108,6 +131,8 @@ pub enum Prop {
     Enabled(bool),
     TextStyle(TextStyle),
     Variant(ButtonVariant),
+    /// Which axes a `ScrollView` scrolls.
+    ScrollAxes(ScrollAxes),
 }
 
 impl Prop {
@@ -143,4 +168,4 @@ macro_rules! static_value {
     )*};
 }
 
-static_value!(TextStyle, ButtonVariant);
+static_value!(TextStyle, ButtonVariant, ScrollAxes);

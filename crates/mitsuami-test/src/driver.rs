@@ -69,7 +69,12 @@ fn native() -> (Ui, Driver) {
     let show = std::env::var("MITSUAMI_SHOW_WINDOWS").is_ok_and(|v| v == "1");
     let backend = AppKitBackend::new(
         mtm,
-        BackendOptions { show_windows: show, record_commands: true, force_light_appearance: true },
+        BackendOptions {
+            show_windows: show,
+            record_commands: true,
+            force_light_appearance: true,
+            private_clipboard: true,
+        },
     );
     let handle = backend.handle();
     let ui = Ui::new(backend);

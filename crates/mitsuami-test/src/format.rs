@@ -19,6 +19,7 @@ fn describe_props(props: &[Prop]) -> String {
             Prop::Enabled(b) => extra.push(format!("enabled={b}")),
             Prop::TextStyle(s) => extra.push(format!("style={s:?}")),
             Prop::Variant(v) => extra.push(format!("variant={v:?}")),
+            Prop::ScrollAxes(a) => extra.push(format!("scroll={a:?}")),
         }
     }
     let mut out = String::new();
@@ -105,6 +106,7 @@ pub(crate) fn commands(log: &[Command]) -> String {
                 let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
                 format!("focus order {window} [{}]", order.join(" "))
             }
+            Command::ScrollTo { id, offset } => format!("scroll {id} to {},{}", Num(offset.x), Num(offset.y)),
             Command::Focus { id } => format!("focus {id}"),
         };
         out.push_str(&line);
@@ -125,6 +127,7 @@ pub(crate) fn wireframe(root: &NodeInfo) -> String {
         match kind {
             WidgetKind::Window => "#8a8f98",
             WidgetKind::Container | WidgetKind::Fragment => "#b5bac2",
+            WidgetKind::ScrollView => "#5f7fa0",
             WidgetKind::Text => "#3f7f5f",
             WidgetKind::Button => "#2f6fdf",
             WidgetKind::TextInput => "#a0602a",

@@ -185,18 +185,24 @@ Raw RGB is allowed on containers and text. It is deliberately not exposed on nat
 The core speaks **only in `NodeId`s and plain data**. Each backend keeps its own `NodeId → native handle` map, so core has no generic parameters and no `dyn Any` handles.
 
 ```rust
-// As implemented in M0 (crates/mitsuami-core/src/{command,backend}.rs).
+// As implemented (crates/mitsuami-core/src/{command,backend,services}.rs).
 pub enum Command {
-    Create        { id: NodeId, kind: WidgetKind, props: Vec<Prop> }, // windows are nodes too (WidgetKind::Window)
+    Create        { id: NodeId, kind: WidgetKind, props: Vec<Prop> }, // views start with a zero frame
     SetProp       { id: NodeId, prop: Prop },
-    Insert        { parent: NodeId, child: NodeId, index: usize },
+    Insert        { parent: NodeId, child: NodeId, index: usize },  // a ScrollView has exactly one child
     Remove        { parent: NodeId, child: NodeId },
     Destroy       { id: NodeId },       // every native node of a removed subtree, children first
     SetFrame      { id: NodeId, frame: Rect },          // parent-relative, logical units; never for windows
     SetA11y       { id: NodeId, a11y: A11yProps },      // backends may no-op initially
     SetWindowSize { id: NodeId, size: Size },
     SetFocusOrder { window: NodeId, order: Vec<NodeId> }, // Tab order, owned by the core
+    ScrollTo      { id: NodeId, offset: Point },        // already clamped; backend reports Scrolled
     Focus         { id: NodeId },
+}
+
+pub enum UiEvent {   // backend → core, through the EventSink
+    Click, Changed(EventValue), Submit, FocusIn, FocusOut, Scrolled(Point),
+    WindowResized(Size), WindowCloseRequested, MetricsChanged,
 }
 
 pub trait Backend {
@@ -204,23 +210,42 @@ pub trait Backend {
     fn metrics(&self) -> PlatformMetrics;             // fonts, spacing tokens, scale, color scheme, reduced motion…
     fn apply(&mut self, batch: &[Command]);
     fn measure(&mut self, id: NodeId, request: MeasureRequest) -> Size;
+    fn services(&self) -> Box<dyn Services>;          // clipboard, dialogs, menus (replaceable: tests use a fake)
 
     // Testing and accessibility hooks: part of the contract from day one.
     fn perform(&mut self, id: NodeId, action: &A11yAction) -> Result<(), ActionError>;     // act on the native control
-    fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError>; // raw key input
-    fn native_state(&self, id: NodeId) -> Option<NativeState>; // what the widget actually shows (desync checks)
+    fn synthesize(&mut self, id: NodeId, input: &SyntheticInput) -> Result<(), ActionError>; // keys, scroll wheel
+    fn native_state(&self, id: NodeId) -> Option<NativeState>; // props, frame, children, focus, scroll offset
     fn capture(&mut self, id: NodeId) -> Result<Image, CaptureError>; // offscreen screenshot
 }
-// Still to come: `services()` (dialogs, menus, clipboard, …) and the run
-// loop entry point, both with M1.
+
+pub trait Services {
+    fn clipboard_text(&mut self) -> Option<String>;
+    fn set_clipboard_text(&mut self, text: &str);
+    fn alert(&mut self, parent: Option<NodeId>, alert: &Alert, reply: Reply<usize>);   // never blocks
+    fn open_file(&mut self, parent: Option<NodeId>, request: &OpenFile, reply: Reply<Option<Vec<PathBuf>>>);
+    fn save_file(&mut self, parent: Option<NodeId>, request: &SaveFile, reply: Reply<Option<PathBuf>>);
+    fn set_menu(&mut self, menu: &MenuBarData, activate: Rc<dyn Fn(u32)>); // keeps the platform's standard menus
+}
 ```
+
+A platform's **run loop** drives the `Ui` through three hooks:
+- **`Ui::tick()`** runs ready tasks and due timers, dispatches events and commits, repeating until idle. Call it before the loop sleeps.
+- **`Ui::set_commit_scheduler`** and **`Ui::set_waker`** (thread-safe) make the loop turn when something changes.
+- **`Ui::time_to_next_timer()`** says when to wake up for `sleep`.
+
+On AppKit, these are a `CFRunLoopObserver` and one re-armed `CFRunLoopTimer`, both in common modes.
 
 Properties of this contract:
 
 - **Serializable and inspectable.** Commands can be logged, snapshot-tested and replayed. They could even be sent to a devtools inspector later.
 - **The headless backend is trivial to write.** It makes layout, trees and a11y fully testable in CI without a display, and it is the default backend for integration tests (§12).
 - **Controlled inputs** (`v-model`) avoid feedback loops: the backend emits `Changed(text)`, core updates the signal, and the effect sends `SetProp` back only if the value differs from what the native widget already holds. This preserves the cursor, selection and IME composition.
-- **Threading:** all UI work runs on the main thread, and the reactive runtime is `!Send`. Background work uses `spawn` (a thread pool or async runtime) and hands results back through a `MainThreadDispatcher` that each backend implements on its run loop. `spawn_local` runs futures on the UI thread.
+- **Threading:** all UI work runs on the main thread, and the reactive runtime is `!Send`.
+  - `spawn_local` runs futures on the UI thread.
+  - `spawn_blocking` runs work on another thread and resumes the task on the UI thread. It uses standard `Waker`s, which call the run loop's thread-safe waker.
+  - `sleep` uses the `Ui`'s clock, which tests replace with a manual one (`app.advance(...)`).
+- **Scopes:** tasks and event handlers run in the reactive scope of the component that created them. `inject`, `spawn_local` and `sleep` therefore work inside them, and disposing the component cancels its tasks.
 
 ---
 
@@ -315,7 +340,8 @@ impl NativeRender for Rating {                 // trait defined by mitsuami-appk
 
 - Domain logic is **plain Rust**: no mitsuami dependency, `Send` where useful, async-friendly, and testable through its own public API.
 - **Stores** (Pinia-like) are the UI-thread adapter. They own signals and expose actions that call into domain logic.
-- **Resources and actions** handle async: `resource(fetch_fn)` returns a `{ loading, data, error }` signal set, and `action(fn)` gives pending-state tracking. Results come back to the UI thread through the dispatcher.
+- **Async** uses plain futures: `spawn_local`, `spawn_blocking` and `sleep` (built), plus `alert`, `open_file` and `save_file` for dialogs.
+- **Resources and actions** (M5) will wrap these: `resource(fetch_fn)` returns a `{ loading, data, error }` signal set, and `action(fn)` gives pending-state tracking.
 - `provide` / `inject` replaces globals, so screens can be tested with mock stores.
 
 Every per-platform screen (§6.1) consumes the same stores and composables. That is the reuse boundary.
@@ -600,7 +626,7 @@ Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, d
 | Platform vs runtime checks | Platform is compile-time (`platform!`); capabilities are runtime |
 | Testing | No unit tests. Integration (headless) + e2e (native) with one API; a11y-driven queries and actions; Chromatic-style visual regression; testing toolkit shipped to users |
 
-## 16. Implementation notes (M1)
+## 16. Implementation notes (M1 and the contract work)
 
 Things the AppKit backend taught us, some of them now part of the contract:
 
@@ -609,6 +635,11 @@ Things the AppKit backend taught us, some of them now part of the contract:
 - **Typing goes through the field editor** (`insertText:`, `deleteBackward:`, `insertNewline:`), so the delegate and action paths are the real ones. Focusing a field selects all of its text, so the backend puts the caret at the end before typing, like clicking past the end would.
 - **Tests run in offscreen windows** with the light appearance forced, for comparable captures (`MITSUAMI_SHOW_WINDOWS=1` shows them). Default (Primary) buttons render grey in inactive windows. That's AppKit's behavior, and baselines reflect it.
 - **Code-built windows get no Tab order.** AppKit's automatic key view loop orders controls by position on screen, which is wrong for right-to-left layouts and absolute positioning. The core now sends the order (`SetFocusOrder`), and the backend links `nextKeyView` into a loop. The conformance tests use three controls on purpose: with two, wrap-around would make any order pass. They were confirmed to fail with AppKit's position-based order.
+- **Reactive styles:** every style setter takes a literal, a signal or a closure, and `style_with` edits several fields reactively. `hidden` is a flag of its own, so un-hiding restores the node's `display` (a grid stays a grid).
+- **Focus:** AppKit reports focus through KVO on `NSWindow.firstResponder`. While a text field is being edited, the first responder is the window's field editor, and its delegate isn't set yet when focus moves. The backend therefore walks up from the responder through its superviews to the nearest known view. The mirror check compares native focus with the core's on every settle.
+- **ScrollView:** `NSScrollView` with our content view as its document view. Scroll changes are observed through the clip view's bounds-change notifications, including programmatic scrolls, so `Scrolled` fires for both. Window-coordinate frames, visibility (clipped by enclosing scroll views) and `scroll_into_view` are computed in the core, so all backends agree. As in CSS, a scroll view's natural size is its content's, so its siblings need `.shrink(0.0)` to keep their size.
+- **Run loop:** `-[NSApplication stop:]` waits for an event, so stopping from an observer posts an empty application-defined event.
+- **Services:** tests always use the scripted fake, even natively, so they never show real dialogs or touch the real clipboard. The real AppKit services have their own checks (`mitsuami-appkit/tests/services.rs`): a private pasteboard, the real `NSMenu` bar, an alert sheet answered by clicking, and a cancelled open panel.
 - **`cargo test -- --native` also reaches libtest harnesses**, which reject the flag, so `MITSUAMI_NATIVE=1` is the workspace-wide switch.
 - **Known gap: min-content text measurement.** Min-content currently falls back to max-content, so text never shrinks below one line inside flex rows. It still wraps under a definite width (columns, fixed widths).
 

@@ -17,6 +17,14 @@ objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 objc2-core-foundation.workspace = true
 block2.workspace = true
+objc2-uniform-type-identifiers.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+mitsuami-reactive.workspace = true
+
+[[test]]
+name = "services"
+harness = false
 
 [lints]
 workspace = true

@@ -3,7 +3,7 @@
 
 use mitsuami_core::{
     Align, ButtonVariant, Children, Display, Element, ElementBuilder, EventValue, FlexDirection, Justify, Length,
-    NodeId, Prop, TextStyle, Track, Ui, UiEvent, View, WidgetKind,
+    NodeId, Point, Prop, ScrollAxes, TextStyle, Track, Ui, UiEvent, View, WidgetKind,
 };
 use mitsuami_reactive::{IntoValue, Signal};
 
@@ -49,35 +49,40 @@ impl Container {
         self.children(child)
     }
 
-    pub fn flex_direction(self, direction: FlexDirection) -> Container {
-        self.style(|s| s.flex_direction = direction)
+    pub fn flex_direction(mut self, direction: impl IntoValue<FlexDirection>) -> Container {
+        self.0.style_prop(direction.into_value(), |s, v| s.flex_direction = v);
+        self
     }
 
     /// Gap between rows and columns.
-    pub fn gap(self, gap: impl Into<Length>) -> Container {
-        let gap = gap.into();
-        self.style(|s| {
-            s.row_gap = gap;
-            s.column_gap = gap;
-        })
+    pub fn gap(mut self, gap: impl IntoValue<Length>) -> Container {
+        self.0.style_prop(gap.into_value(), |s, v| {
+            s.row_gap = v;
+            s.column_gap = v;
+        });
+        self
     }
 
-    pub fn row_gap(self, gap: impl Into<Length>) -> Container {
-        self.style(|s| s.row_gap = gap.into())
+    pub fn row_gap(mut self, gap: impl IntoValue<Length>) -> Container {
+        self.0.style_prop(gap.into_value(), |s, v| s.row_gap = v);
+        self
     }
 
-    pub fn column_gap(self, gap: impl Into<Length>) -> Container {
-        self.style(|s| s.column_gap = gap.into())
+    pub fn column_gap(mut self, gap: impl IntoValue<Length>) -> Container {
+        self.0.style_prop(gap.into_value(), |s, v| s.column_gap = v);
+        self
     }
 
     /// Cross-axis alignment of children (`align-items`).
-    pub fn align(self, align: Align) -> Container {
-        self.style(|s| s.align_items = Some(align))
+    pub fn align(mut self, align: impl IntoValue<Align>) -> Container {
+        self.0.style_prop(align.into_value(), |s, v| s.align_items = Some(v));
+        self
     }
 
     /// Main-axis distribution of children (`justify-content`).
-    pub fn justify(self, justify: Justify) -> Container {
-        self.style(|s| s.justify_content = Some(justify))
+    pub fn justify(mut self, justify: impl IntoValue<Justify>) -> Container {
+        self.0.style_prop(justify.into_value(), |s, v| s.justify_content = Some(v));
+        self
     }
 
     pub fn wrap(self) -> Container {
@@ -130,6 +135,91 @@ impl Grid {
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Container {
         Container::new().style(|s| s.display = Display::Grid)
+    }
+}
+
+/// A native scroll container. Its children go into a content box that
+/// keeps its natural size, so it can be larger than the scroll view.
+///
+/// Give the scroll view a bounded size (a fixed height, or `grow` inside a
+/// sized parent); otherwise it grows with its content and never scrolls.
+/// As in CSS, its natural size is its content's, so in a flex container its
+/// siblings shrink along with it unless they have `.shrink(0.0)`.
+pub struct ScrollView {
+    outer: Element,
+    content: Container,
+}
+
+impl ElementBuilder for ScrollView {
+    fn element(&mut self) -> &mut Element {
+        &mut self.outer
+    }
+}
+
+impl View for ScrollView {
+    fn build(mut self, ui: &Ui) -> NodeId {
+        self.outer.add_children(self.content);
+        self.outer.build(ui)
+    }
+}
+
+impl Default for ScrollView {
+    fn default() -> ScrollView {
+        ScrollView::new()
+    }
+}
+
+impl ScrollView {
+    /// Scrolls vertically.
+    pub fn new() -> ScrollView {
+        ScrollView::with_axes(ScrollAxes::Vertical)
+    }
+
+    pub fn horizontal() -> ScrollView {
+        ScrollView::with_axes(ScrollAxes::Horizontal)
+    }
+
+    pub fn both() -> ScrollView {
+        ScrollView::with_axes(ScrollAxes::Both)
+    }
+
+    fn with_axes(axes: ScrollAxes) -> ScrollView {
+        let mut outer = Element::new(WidgetKind::ScrollView);
+        outer.prop(axes.into_value(), Prop::ScrollAxes);
+        outer.style.scroll_x = axes.horizontal();
+        outer.style.scroll_y = axes.vertical();
+        // The content stretches across the non-scrolling axis and keeps its
+        // natural size along the scrolling ones.
+        outer.style.flex_direction =
+            if axes == ScrollAxes::Horizontal { FlexDirection::Row } else { FlexDirection::Column };
+        // Horizontal content flows in a row; the other kinds in a column.
+        let mut content = Container::new().shrink(0.0);
+        if axes == ScrollAxes::Horizontal {
+            content = content.flex_direction(FlexDirection::Row);
+        }
+        if axes == ScrollAxes::Both {
+            content = content.align_self(Align::Start);
+        }
+        ScrollView { outer, content }
+    }
+
+    pub fn children(mut self, children: impl Children) -> ScrollView {
+        self.content = self.content.children(children);
+        self
+    }
+
+    pub fn child(self, child: impl View) -> ScrollView {
+        self.children(child)
+    }
+
+    /// Called with the new offset whenever the content scrolls.
+    pub fn on_scroll(mut self, handler: impl Fn(Point) + 'static) -> ScrollView {
+        self.outer.on(move |event| {
+            if let UiEvent::Scrolled(offset) = event {
+                handler(*offset);
+            }
+        });
+        self
     }
 }
 

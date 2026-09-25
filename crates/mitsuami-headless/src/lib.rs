@@ -5,6 +5,10 @@
 //! text with fixed, platform-independent metrics so layouts are deterministic:
 //! each character is `0.5em` wide and lines are `1.25em` tall.
 
+mod services;
+
+pub use services::{FakeServices, FakeServicesHandle, Pending, PendingAlert, PendingOpen, PendingSave};
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -15,7 +19,7 @@ use mitsuami_core::backend::{
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::units::SpacingScale;
-use mitsuami_core::{Command, EventValue, NodeId, Prop, Rect, Size, TextStyle, UiEvent, WidgetKind, find_prop};
+use mitsuami_core::{Command, EventValue, NodeId, Point, Prop, Rect, Size, TextStyle, UiEvent, WidgetKind, find_prop};
 
 /// Fixed metrics: 16px body text, 4/8/12/16/24 spacing, scale factor 1.
 pub fn metrics() -> PlatformMetrics {
@@ -44,6 +48,7 @@ struct HeadlessNode {
     frame: Rect,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
+    scroll_offset: Point,
 }
 
 struct State {
@@ -85,6 +90,15 @@ impl State {
         (1..order.len())
             .map(|step| order[(start + step) % order.len()])
             .find(|candidate| self.nodes.get(candidate).is_some_and(|n| find_prop!(n.props, Enabled) != Some(false)))
+    }
+
+    /// Moves a scroll view, reporting it like a platform would.
+    fn scroll(&mut self, id: NodeId, offset: Point) {
+        let node = self.nodes.get_mut(&id).unwrap();
+        if node.scroll_offset != offset {
+            node.scroll_offset = offset;
+            self.emit(id, UiEvent::Scrolled(offset));
+        }
     }
 
     fn focus(&mut self, id: NodeId) {
@@ -213,6 +227,7 @@ impl Backend for HeadlessBackend {
                             frame: Rect::ZERO,
                             parent: None,
                             children: Vec::new(),
+                            scroll_offset: Point::ZERO,
                         },
                     );
                 }
@@ -223,6 +238,10 @@ impl Backend for HeadlessBackend {
                 Command::Insert { parent, child, index } => {
                     if let Some(p) = state.node(*child, command).parent {
                         violation(command, &format!("child is still attached to {p}"));
+                    }
+                    let parent_node = state.node(*parent, command);
+                    if parent_node.kind == WidgetKind::ScrollView && !parent_node.children.is_empty() {
+                        violation(command, "a ScrollView has a single native child (its content)");
                     }
                     let siblings = &mut state.node(*parent, command).children;
                     if *index > siblings.len() {
@@ -271,6 +290,12 @@ impl Backend for HeadlessBackend {
                         state.node(*id, command);
                     }
                     state.focus_orders.insert(*window, order.clone());
+                }
+                Command::ScrollTo { id, offset } => {
+                    if state.node(*id, command).kind != WidgetKind::ScrollView {
+                        violation(command, "not a ScrollView");
+                    }
+                    state.scroll(*id, *offset);
                 }
                 Command::Focus { id } => {
                     state.node(*id, command);
@@ -351,7 +376,27 @@ impl Backend for HeadlessBackend {
             return Err(ActionError::Disabled);
         }
         let kind = node.kind;
-        let SyntheticInput::Key(key) = input;
+        let key = match input {
+            SyntheticInput::Key(key) => key,
+            SyntheticInput::Scroll { dx, dy } => {
+                if kind != WidgetKind::ScrollView {
+                    return Err(ActionError::Unsupported);
+                }
+                let node = &state.nodes[&id];
+                let axes = find_prop!(node.props, ScrollAxes).unwrap_or_default();
+                let content = node.children.first().map_or(Size::ZERO, |c| state.nodes[c].frame.size);
+                let viewport = node.frame.size;
+                let clamp = |v: f32, content: f32, viewport: f32, on: bool| {
+                    if on { v.clamp(0.0, (content - viewport).max(0.0)) } else { 0.0 }
+                };
+                let offset = Point::new(
+                    clamp(node.scroll_offset.x + dx, content.width, viewport.width, axes.horizontal()),
+                    clamp(node.scroll_offset.y + dy, content.height, viewport.height, axes.vertical()),
+                );
+                state.scroll(id, offset);
+                return Ok(());
+            }
+        };
         match (kind, key) {
             (WidgetKind::TextInput, Key::Char(_) | Key::Backspace) => {
                 state.focus(id);
@@ -392,11 +437,16 @@ impl Backend for HeadlessBackend {
             parent: node.parent,
             children: node.children.clone(),
             focused: state.focused == Some(id),
+            scroll_offset: (node.kind == WidgetKind::ScrollView).then_some(node.scroll_offset),
         })
     }
 
     fn capture(&mut self, _id: NodeId) -> Result<Image, CaptureError> {
         Err(CaptureError::Unsupported)
+    }
+
+    fn services(&self) -> Box<dyn mitsuami_core::services::Services> {
+        Box::new(FakeServices::default())
     }
 }
 
