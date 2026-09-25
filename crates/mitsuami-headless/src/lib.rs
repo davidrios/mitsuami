@@ -52,6 +52,7 @@ struct State {
     metrics: PlatformMetrics,
     log: Vec<Command>,
     focused: Option<NodeId>,
+    focus_orders: BTreeMap<NodeId, Vec<NodeId>>,
 }
 
 impl State {
@@ -75,30 +76,15 @@ impl State {
         }
     }
 
-    /// The next focusable control after `id` in tree order, wrapping around
-    /// within its window: full keyboard access, where every control takes focus.
+    /// The next enabled control after `id` in its window's focus order (as
+    /// sent by the core), wrapping around. Every control takes focus, as with
+    /// full keyboard access.
     fn next_focusable(&self, id: NodeId) -> Option<NodeId> {
-        let mut root = id;
-        while let Some(parent) = self.nodes.get(&root).and_then(|n| n.parent) {
-            root = parent;
-        }
-        let mut order = Vec::new();
-        let mut stack = vec![root];
-        while let Some(node_id) = stack.pop() {
-            let node = &self.nodes[&node_id];
-            let enabled = find_prop!(node.props, Enabled) != Some(false);
-            if enabled
-                && matches!(
-                    node.kind,
-                    WidgetKind::Button | WidgetKind::TextInput | WidgetKind::Checkbox | WidgetKind::Switch
-                )
-            {
-                order.push(node_id);
-            }
-            stack.extend(node.children.iter().rev());
-        }
-        let position = order.iter().position(|n| *n == id)?;
-        order.get(position + 1).or(order.first()).copied().filter(|next| *next != id)
+        let order = self.focus_orders.values().find(|order| order.contains(&id))?;
+        let start = order.iter().position(|n| *n == id)?;
+        (1..order.len())
+            .map(|step| order[(start + step) % order.len()])
+            .find(|candidate| self.nodes.get(candidate).is_some_and(|n| find_prop!(n.props, Enabled) != Some(false)))
     }
 
     fn focus(&mut self, id: NodeId) {
@@ -143,6 +129,7 @@ impl HeadlessBackend {
                 metrics: metrics(),
                 log: Vec::new(),
                 focused: None,
+                focus_orders: BTreeMap::new(),
             })),
         }
     }
@@ -265,6 +252,7 @@ impl Backend for HeadlessBackend {
                     if state.focused == Some(*id) {
                         state.focused = None;
                     }
+                    state.focus_orders.remove(id);
                 }
                 Command::SetFrame { id, frame } => {
                     let node = state.node(*id, command);
@@ -275,6 +263,15 @@ impl Backend for HeadlessBackend {
                 }
                 Command::SetA11y { id, a11y } => state.node(*id, command).a11y = a11y.clone(),
                 Command::SetWindowSize { id, size } => state.node(*id, command).frame.size = *size,
+                Command::SetFocusOrder { window, order } => {
+                    if state.node(*window, command).kind != WidgetKind::Window {
+                        violation(command, "not a window");
+                    }
+                    for id in order {
+                        state.node(*id, command);
+                    }
+                    state.focus_orders.insert(*window, order.clone());
+                }
                 Command::Focus { id } => {
                     state.node(*id, command);
                     state.focus(*id);

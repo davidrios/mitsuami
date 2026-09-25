@@ -32,6 +32,7 @@ struct Node {
     style: Style,
     a11y: A11yProps,
     test_id: Option<String>,
+    tab_index: Option<u32>,
     handlers: Vec<Handler>,
     taffy: Option<taffy::NodeId>,
     /// Relative to the native parent.
@@ -57,6 +58,8 @@ struct Inner {
     windows: Vec<NodeId>,
     styles_dirty: bool,
     resync: BTreeSet<NodeId>,
+    /// Last focus order sent, per window.
+    focus_orders: BTreeMap<NodeId, Vec<NodeId>>,
     commit_scheduler: Option<Rc<dyn Fn()>>,
     commit_scheduled: bool,
 }
@@ -110,6 +113,7 @@ impl Ui {
                 windows: Vec::new(),
                 styles_dirty: true,
                 resync: BTreeSet::new(),
+                focus_orders: BTreeMap::new(),
                 commit_scheduler: None,
                 commit_scheduled: false,
             })),
@@ -181,6 +185,7 @@ impl Ui {
                     style: Style::default(),
                     a11y: A11yProps::default(),
                     test_id: None,
+                    tab_index: None,
                     handlers: Vec::new(),
                     taffy,
                     frame: Rect::ZERO,
@@ -257,6 +262,21 @@ impl Ui {
             }
         }
         self.changed();
+    }
+
+    /// Moves a control ahead in the Tab order: controls with a tab index
+    /// come first, lowest index first, then everything else in tree order.
+    pub fn set_tab_index(&self, id: NodeId, index: Option<u32>) {
+        if let Some(node) = self.inner.borrow_mut().nodes.get_mut(&id) {
+            node.tab_index = index;
+        }
+        self.changed();
+    }
+
+    /// The keyboard order of a window's focusable controls, as sent to the
+    /// backend.
+    pub fn focus_order(&self, window: NodeId) -> Vec<NodeId> {
+        self.inner.borrow().focus_order(window)
     }
 
     pub fn set_test_id(&self, id: NodeId, test_id: impl Into<String>) {
@@ -350,6 +370,7 @@ impl Ui {
                 }
                 inner.resync.remove(&node_id);
                 inner.windows.retain(|w| *w != node_id);
+                inner.focus_orders.remove(&node_id);
                 if node.kind.is_native() {
                     inner.pending.push(Command::Destroy { id: node_id });
                 }
@@ -388,6 +409,7 @@ impl Ui {
             inner.resolve_styles();
         }
         inner.resync_all();
+        inner.sync_focus_orders();
         let batch = std::mem::take(&mut inner.pending);
         if !batch.is_empty() {
             inner.backend.apply(&batch);
@@ -622,6 +644,42 @@ impl Inner {
             let _ = self.taffy.set_children(t, &taffy_children);
         }
         self.nodes.get_mut(&parent).unwrap().native_children = desired;
+    }
+
+    /// Focusable controls in reading (tree) order, explicit tab indices first.
+    fn focus_order(&self, window: NodeId) -> Vec<NodeId> {
+        fn walk(inner: &Inner, id: NodeId, out: &mut Vec<(Option<u32>, NodeId)>) {
+            let node = &inner.nodes[&id];
+            if node.style.display == Display::None {
+                return;
+            }
+            if matches!(
+                node.kind,
+                WidgetKind::Button | WidgetKind::TextInput | WidgetKind::Checkbox | WidgetKind::Switch
+            ) {
+                out.push((node.tab_index, id));
+            }
+            for child in &node.native_children {
+                walk(inner, *child, out);
+            }
+        }
+        let mut entries = Vec::new();
+        if self.nodes.contains_key(&window) {
+            walk(self, window, &mut entries);
+        }
+        // Stable sort: explicit indices first (ascending), tree order otherwise.
+        entries.sort_by_key(|(index, _)| index.unwrap_or(u32::MAX));
+        entries.into_iter().map(|(_, id)| id).collect()
+    }
+
+    fn sync_focus_orders(&mut self) {
+        for window in self.windows.clone() {
+            let order = self.focus_order(window);
+            if self.focus_orders.get(&window) != Some(&order) {
+                self.focus_orders.insert(window, order.clone());
+                self.pending.push(Command::SetFocusOrder { window, order });
+            }
+        }
     }
 
     fn resolve_styles(&mut self) {

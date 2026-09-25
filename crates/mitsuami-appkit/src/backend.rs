@@ -95,6 +95,8 @@ struct State {
     events: EventSink,
     log: Vec<Command>,
     pending_show: Vec<NodeId>,
+    /// The key view chain last built for each window.
+    focus_orders: HashMap<NodeId, Vec<NodeId>>,
 }
 
 pub struct AppKitBackend {
@@ -176,6 +178,7 @@ impl AppKitBackend {
                 events: EventSink::default(),
                 log: Vec::new(),
                 pending_show: Vec::new(),
+                focus_orders: HashMap::new(),
             })),
         }
     }
@@ -259,9 +262,9 @@ impl State {
                     )
                 };
                 unsafe { window.setReleasedWhenClosed(false) };
-                // Code-built windows get no Tab order unless they ask for
-                // one; this keeps it in step as views come and go.
-                window.setAutorecalculatesKeyViewLoop(true);
+                // The core owns the Tab order (reading order, not geometry)
+                // and sends it with SetFocusOrder.
+                window.setAutorecalculatesKeyViewLoop(false);
                 let host = HostView::new(mtm, true);
                 window.setContentView(Some(&host));
                 let delegate = WindowDelegate::new(mtm, id, self.events.clone());
@@ -401,6 +404,7 @@ impl State {
                 let Some(node) = self.nodes.remove(id) else { violation(command, "node does not exist") };
                 self.by_view.remove(&key(node.widget.view()));
                 self.pending_show.retain(|w| w != id);
+                self.focus_orders.remove(id);
                 match &node.widget {
                     Widget::Window { window, .. } => {
                         window.setDelegate(None);
@@ -431,6 +435,28 @@ impl State {
                 }
                 _ => violation(command, "not a window"),
             },
+            Command::SetFocusOrder { window, order } => {
+                let ns_window = match self.nodes.get(window).map(|n| &n.widget) {
+                    Some(Widget::Window { window, .. }) => window.clone(),
+                    _ => violation(command, "not a window"),
+                };
+                // Unlink the previous chain, then link the new one as a loop.
+                // AppKit still skips views that can't take focus right now
+                // (disabled, or not reachable under the user's keyboard
+                // navigation setting).
+                for old in self.focus_orders.remove(window).unwrap_or_default() {
+                    if let Some(node) = self.nodes.get(&old) {
+                        unsafe { node.widget.view().setNextKeyView(None) };
+                    }
+                }
+                let views: Vec<Retained<NSView>> = order.iter().map(|id| self.view(*id, command)).collect();
+                for (i, view) in views.iter().enumerate() {
+                    let next = &views[(i + 1) % views.len()];
+                    unsafe { view.setNextKeyView(Some(next)) };
+                }
+                ns_window.setInitialFirstResponder(views.first().map(|v| &**v));
+                self.focus_orders.insert(*window, order.clone());
+            }
             Command::Focus { id } => {
                 let view = self.view(*id, command);
                 if let Some(window) = view.window() {

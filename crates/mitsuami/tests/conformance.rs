@@ -149,6 +149,87 @@ async fn tab_moves_focus_to_the_next_text_field(app: TestApp) {
     app.expect(by_label("First")).not_to_be_focused().await;
 }
 
+/// Focuses `from`, presses Tab, and returns whether `to` got focus.
+async fn tab_from(app: &TestApp, from: &str, to: &str) {
+    app.get_by_label(from).focus().await;
+    app.expect(by_label(from)).to_be_focused().await;
+    app.get_by_label(from).press(Key::Tab).await;
+    app.expect(by_label(to)).to_be_focused().await;
+}
+
+// Each Tab test uses three controls arranged so that reading order and
+// on-screen (left-to-right, top-to-bottom) order disagree about what comes
+// next; with only two, wrap-around would make any order pass.
+
+#[mitsuami_test::test]
+async fn tab_order_follows_reading_order_in_right_to_left_layouts(app: TestApp) {
+    // Laid out right to left: on screen C | B | A.
+    app.mount(|| {
+        Row::new().direction(TextDirection::Rtl).align(Align::Start).children((
+            TextInput::new().a11y_label("A").width(120),
+            TextInput::new().a11y_label("B").width(120),
+            TextInput::new().a11y_label("C").width(120),
+        ))
+    });
+    assert!(app.get_by_label("A").frame().x() > app.get_by_label("C").frame().x());
+    // By position, A (rightmost) would wrap to C (leftmost).
+    tab_from(&app, "A", "B").await;
+    tab_from(&app, "B", "C").await;
+}
+
+#[mitsuami_test::test]
+async fn tab_order_follows_the_tree_not_the_geometry(app: TestApp) {
+    // On screen, top to bottom: Second, First, Third.
+    app.mount(|| {
+        Container::new().size(300, 300).children((
+            TextInput::new().a11y_label("First").absolute().top(100).start(0).width(120),
+            TextInput::new().a11y_label("Second").absolute().top(0).start(0).width(120),
+            TextInput::new().a11y_label("Third").absolute().top(200).start(0).width(120),
+        ))
+    });
+    assert!(app.get_by_label("Second").frame().y() < app.get_by_label("First").frame().y());
+    // By position, First would go to Third.
+    tab_from(&app, "First", "Second").await;
+    tab_from(&app, "Second", "Third").await;
+}
+
+#[mitsuami_test::test]
+async fn tab_index_puts_controls_first(app: TestApp) {
+    app.mount(|| {
+        Column::new().children((
+            TextInput::new().a11y_label("A"),
+            TextInput::new().a11y_label("B").tab_index(1),
+            TextInput::new().a11y_label("C"),
+        ))
+    });
+    // Order: B, A, C, then around again. By position, B would go to C.
+    tab_from(&app, "B", "A").await;
+    tab_from(&app, "A", "C").await;
+    tab_from(&app, "C", "B").await;
+}
+
+#[mitsuami_test::test]
+async fn tab_order_updates_when_controls_come_and_go(app: TestApp) {
+    let middle = signal(false);
+    app.mount(move || {
+        Column::new().children((
+            TextInput::new().a11y_label("Top"),
+            Show::new(middle, || TextInput::new().a11y_label("Middle")),
+            TextInput::new().a11y_label("Bottom"),
+        ))
+    });
+    tab_from(&app, "Top", "Bottom").await;
+
+    middle.set(true);
+    app.settle().await;
+    tab_from(&app, "Top", "Middle").await;
+    tab_from(&app, "Middle", "Bottom").await;
+
+    middle.set(false);
+    app.settle().await;
+    tab_from(&app, "Top", "Bottom").await;
+}
+
 #[mitsuami_test::test]
 async fn disabled_controls_refuse_actions(app: TestApp) {
     app.mount(|| {

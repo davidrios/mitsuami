@@ -51,6 +51,14 @@ pub enum Command {
         id: NodeId,
         size: Size,
     },
+    /// The keyboard (Tab) order of a window's focusable controls. Sent when
+    /// it changes. Backends chain focus in this order; which controls can
+    /// actually take focus stays a platform decision (e.g. macOS keyboard
+    /// navigation settings).
+    SetFocusOrder {
+        window: NodeId,
+        order: Vec<NodeId>,
+    },
     Focus {
         id: NodeId,
     },

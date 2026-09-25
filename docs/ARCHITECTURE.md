@@ -195,6 +195,7 @@ pub enum Command {
     SetFrame      { id: NodeId, frame: Rect },          // parent-relative, logical units; never for windows
     SetA11y       { id: NodeId, a11y: A11yProps },      // backends may no-op initially
     SetWindowSize { id: NodeId, size: Size },
+    SetFocusOrder { window: NodeId, order: Vec<NodeId> }, // Tab order, owned by the core
     Focus         { id: NodeId },
 }
 
@@ -303,7 +304,7 @@ impl NativeRender for Rating {                 // trait defined by mitsuami-appk
 - Built-in widgets derive defaults: a `Button`'s label comes from its text, and so on. Apps override with `.a11y_label("…")`, and so on.
 - Most of the work comes for free because the controls are **native**: NSAccessibility, UIA and GtkAccessible already understand native controls. `SetA11y` mainly carries overrides and relations.
 - Drawn and custom widgets are where real work is needed. The plan is to implement native a11y protocols per backend. [AccessKit](https://github.com/AccessKit/accesskit) is an option for drawn subtrees, because it provides the same semantic model on all three platforms.
-- Core owns **focus order** (tab order follows tree order, with overrides) and keyboard navigation for layout hosts.
+- Core owns **focus order**. The Tab order is reading (tree) order, so it's correct in right-to-left layouts and for absolutely positioned controls. `.tab_index(n)` moves controls ahead. Backends receive it as `SetFocusOrder` and chain native focus accordingly (AppKit: `nextKeyView`). Which controls can take focus stays a platform decision; on macOS, for example, it depends on the Keyboard navigation setting.
 - `PlatformMetrics` exposes reduced motion, high contrast, text scale and color scheme as signals.
 - **RTL:** styles use logical edges (`padding_inline_start`, not `padding_left`). Core mirrors frames for RTL locales, since Taffy doesn't.
 - Text is never baked into images. All strings go through props, so they can be localised.
@@ -607,6 +608,7 @@ Things the AppKit backend taught us, some of them now part of the contract:
 - **Presses go through `accessibilityPerformPress`**, the path VoiceOver uses. For windows that aren't on screen, it returns `NO` even after pressing, so the result is ignored.
 - **Typing goes through the field editor** (`insertText:`, `deleteBackward:`, `insertNewline:`), so the delegate and action paths are the real ones. Focusing a field selects all of its text, so the backend puts the caret at the end before typing, like clicking past the end would.
 - **Tests run in offscreen windows** with the light appearance forced, for comparable captures (`MITSUAMI_SHOW_WINDOWS=1` shows them). Default (Primary) buttons render grey in inactive windows. That's AppKit's behavior, and baselines reflect it.
+- **Code-built windows get no Tab order.** AppKit's automatic key view loop orders controls by position on screen, which is wrong for right-to-left layouts and absolute positioning. The core now sends the order (`SetFocusOrder`), and the backend links `nextKeyView` into a loop. The conformance tests use three controls on purpose: with two, wrap-around would make any order pass. They were confirmed to fail with AppKit's position-based order.
 - **`cargo test -- --native` also reaches libtest harnesses**, which reject the flag, so `MITSUAMI_NATIVE=1` is the workspace-wide switch.
 - **Known gap: min-content text measurement.** Min-content currently falls back to max-content, so text never shrinks below one line inside flex rows. It still wraps under a definite width (columns, fixed widths).
 

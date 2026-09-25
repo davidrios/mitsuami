@@ -101,6 +101,10 @@ pub(crate) fn commands(log: &[Command]) -> String {
             Command::SetWindowSize { id, size } => {
                 format!("window size {id} {}×{}", Num(size.width), Num(size.height))
             }
+            Command::SetFocusOrder { window, order } => {
+                let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
+                format!("focus order {window} [{}]", order.join(" "))
+            }
             Command::Focus { id } => format!("focus {id}"),
         };
         out.push_str(&line);

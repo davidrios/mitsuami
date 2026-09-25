@@ -21,6 +21,7 @@ pub struct Element {
     pub style: Style,
     pub a11y: A11yProps,
     pub test_id: Option<String>,
+    pub tab_index: Option<u32>,
     static_props: Vec<Prop>,
     binders: Vec<Binder>,
     handlers: Vec<Handler>,
@@ -34,6 +35,7 @@ impl Element {
             style: Style::default(),
             a11y: A11yProps::default(),
             test_id: None,
+            tab_index: None,
             static_props: Vec::new(),
             binders: Vec::new(),
             handlers: Vec::new(),
@@ -80,6 +82,9 @@ impl View for Element {
         }
         if let Some(test_id) = self.test_id {
             ui.set_test_id(id, test_id);
+        }
+        if self.tab_index.is_some() {
+            ui.set_tab_index(id, self.tab_index);
         }
         for handler in self.handlers {
             ui.on_event(id, move |e| handler(e));
@@ -266,6 +271,14 @@ pub trait ElementBuilder: Sized {
         self.element().a11y.hidden = true;
         self
     }
+    /// Moves this control ahead in the Tab order. Controls with a tab index
+    /// come first (lowest first); the rest follow in reading order. Prefer
+    /// arranging the tree in the order users should visit it.
+    fn tab_index(mut self, index: u32) -> Self {
+        self.element().tab_index = Some(index);
+        self
+    }
+
     /// Last-resort handle for tests; prefer finding nodes by role and name.
     fn test_id(mut self, id: impl Into<String>) -> Self {
         self.element().test_id = Some(id.into());
