@@ -1,0 +1,21 @@
+# M0.5 WinUI spike (docs/ARCHITECTURE.md §13, §14). Throwaway: not a workspace
+# member, never published. Drives WinUI 3 imperatively through our own
+# windows-bindgen 0.100 bindings (route b).
+[package]
+name = "winui-spike"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[workspace]
+
+[dependencies]
+windows-core = "0.100"
+windows-link = "0.100"
+windows-future = "0.100"
+png = "0.18"
+windows-collections = { version = "0.100", features = ["std"] }
+
+[build-dependencies]
+windows-bindgen = "0.100"

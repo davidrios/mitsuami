@@ -1,0 +1,80 @@
+Microsoft.UI.Xaml.Application::{CreateInstance, Current, Exit, Start}
+Microsoft.UI.Xaml.ApplicationInitializationCallback
+Microsoft.UI.Xaml.IApplication::get_Resources
+Microsoft.UI.Xaml.IApplicationOverrides::{}
+Microsoft.UI.Xaml.LaunchActivatedEventArgs
+Microsoft.UI.Xaml.Window::CreateInstance
+Microsoft.UI.Xaml.IWindow::{Activate, Close, put_Content, put_Title}
+Microsoft.UI.Xaml.IWindow2::get_AppWindow
+Microsoft.UI.Windowing.IAppWindow2::ResizeClient
+Microsoft.UI.Xaml.UIElement::{}
+Microsoft.UI.Xaml.IUIElement::{Measure, get_DesiredSize, UpdateLayout, get_XamlRoot, InvalidateMeasure}
+Microsoft.UI.Xaml.IFrameworkElement::{put_Width, put_Height, get_ActualWidth, get_ActualHeight, add_Loaded, remove_Loaded}
+Microsoft.UI.Xaml.IXamlRoot::get_RasterizationScale
+Microsoft.UI.Xaml.RoutedEventHandler
+Microsoft.UI.Xaml.IResourceDictionary::get_MergedDictionaries
+Microsoft.UI.Xaml.TextWrapping
+Microsoft.UI.Xaml.Controls.Canvas::{CreateInstance, SetLeft, SetTop}
+Microsoft.UI.Xaml.Controls.IPanel::get_Children
+Microsoft.UI.Xaml.Controls.Button::CreateInstance
+Microsoft.UI.Xaml.Controls.IContentControl::put_Content
+Microsoft.UI.Xaml.Controls.Primitives.IButtonBase::{add_Click, remove_Click}
+Microsoft.UI.Xaml.Controls.TextBlock::CreateInstance
+Microsoft.UI.Xaml.Controls.ITextBlock::{put_Text, get_Text, put_TextWrapping}
+Microsoft.UI.Xaml.Controls.XamlControlsResources::CreateInstance
+Microsoft.UI.Xaml.XamlTypeInfo.XamlControlsXamlMetaDataProvider::CreateInstance
+Microsoft.UI.Xaml.Markup.IXamlMetadataProvider
+Microsoft.UI.Xaml.Markup.IXamlType::{}
+Microsoft.UI.Xaml.Markup.XmlnsDefinition
+Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer::CreatePeerForElement
+Microsoft.UI.Xaml.Automation.Peers.IAutomationPeer::GetPattern
+Microsoft.UI.Xaml.Automation.Peers.PatternInterface
+Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider::Invoke
+Microsoft.UI.Dispatching.DispatcherQueue::GetForCurrentThread
+Microsoft.UI.Dispatching.DispatcherQueueHandler
+Microsoft.UI.Dispatching.IDispatcherQueue::TryEnqueue
+Windows.Foundation.Size
+Windows.UI.Xaml.Interop.TypeName
+Windows.Win32.AddPackageDependency
+Windows.Win32.TryCreatePackageDependency
+Windows.Win32.CoInitializeEx
+Windows.Win32.SetProcessDpiAwarenessContext
+Windows.Win32.PostQuitMessage
+Windows.Win32.PACKAGE_VERSION
+Windows.Win32.PackageDependencyProcessorArchitectures
+Windows.Win32.GetProcessHeap
+Windows.Win32.HeapFree
+Windows.Win32.COINIT_APARTMENTTHREADED
+Windows.Win32.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+Windows.Foundation.PropertyValue::CreateString
+Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap::CreateInstance
+Microsoft.UI.Xaml.Media.Imaging.IRenderTargetBitmap::{RenderAsync, GetPixelsAsync, get_PixelWidth, get_PixelHeight}
+Windows.Storage.Streams.DataReader::FromBuffer
+Windows.Storage.Streams.IDataReader::ReadBytes
+Windows.Storage.Streams.IBuffer::get_Length
+Windows.Win32.E_FAIL
+Microsoft.UI.Dispatching.DispatcherQueueController::CreateOnCurrentThread
+Microsoft.UI.Xaml.Hosting.WindowsXamlManager::InitializeForCurrentThread
+Windows.Win32.PeekMessageW
+Windows.Win32.TranslateMessage
+Windows.Win32.DispatchMessageW
+Windows.Win32.MSG
+Windows.Win32.PM_REMOVE
+Windows.Win32.MsgWaitForMultipleObjectsEx
+Windows.Win32.QS_ALLINPUT
+Windows.Win32.MWMO_INPUTAVAILABLE
+Microsoft.UI.Xaml.Controls.TextBox::CreateInstance
+Microsoft.UI.Xaml.IUIElement::{get_FocusState, Focus, add_GotFocus, remove_GotFocus}
+Microsoft.UI.Xaml.IRoutedEventArgs::get_OriginalSource
+Microsoft.UI.Xaml.FocusState
+Microsoft.UI.Xaml.Input.FocusManager::GetFocusedElement
+Microsoft.UI.Xaml.Input.FocusManager::{add_GotFocus, remove_GotFocus}
+Microsoft.UI.Xaml.Input.IFocusManagerGotFocusEventArgs::get_NewFocusedElement
+Microsoft.UI.Xaml.IWindow::add_Activated
+Windows.Win32.GetWindowLongW
+Windows.Win32.SetWindowLongW
+Windows.Win32.GWL_EXSTYLE
+Windows.Win32.WS_EX_LAYERED
+Windows.Win32.SetLayeredWindowAttributes
+Windows.Win32.LWA_ALPHA
+Microsoft.UI.Windowing.IAppWindow::{get_Id, Move}
