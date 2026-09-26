@@ -1,5 +1,6 @@
 //! The app logic behind the screen: a store, as plain signals and actions.
-//! The screen `inject`s it; tests can `provide` their own.
+//! The screen gets the app's instance with `use_store`; tests can `provide`
+//! their own.
 
 use mitsuami::prelude::*;
 
@@ -13,11 +14,13 @@ pub struct Review {
     submitted: Signal<Option<String>>,
 }
 
-impl Review {
-    pub fn new() -> Review {
+impl Store for Review {
+    fn create() -> Review {
         Review { stars: signal(0), locked: signal(true), submitted: signal(None) }
     }
+}
 
+impl Review {
     /// A real app would check here: ask for a password, a policy.
     pub fn unlock(&self) {
         self.locked.set(false);
@@ -50,9 +53,4 @@ impl Review {
             (None, false, n) => format!("{n} of {MAX_STARS} stars"),
         }
     }
-}
-
-/// The store the screen was given.
-pub fn use_review() -> Review {
-    inject::<Review>().expect("provide a Review before mounting the screen")
 }

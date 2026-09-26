@@ -265,11 +265,12 @@ Properties of this contract:
 Logic lives in **composables** (Vue's `useXxx`) or **stores** (Pinia-like). Views are thin, so writing two views costs little.
 
 ```rust
-// shared, platform-agnostic: signals and actions, provided to the screens
+// shared, platform-agnostic: signals and actions, one instance per app
 #[derive(Clone, Copy)]
 pub struct Review { pub stars: Signal<u8>, pub comment: Signal<String>, /* … */ }
-pub fn use_review() -> Review { inject::<Review>().expect("provide a Review") }
+impl Store for Review { fn create() -> Review { /* … */ } }
 
+// every screen: let review = use_store::<Review>();
 pub fn review_screen() -> impl View {
     platform! {
         macos => macos::review_screen(),   // trailing labels, NSStepper, button at the trailing edge

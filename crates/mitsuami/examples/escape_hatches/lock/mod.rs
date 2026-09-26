@@ -48,9 +48,11 @@ impl CustomWidget for Lock {
 fn composed(widget: Composed<Lock>) -> impl View {
     let label = widget.label().unwrap_or_default();
     let text = widget.clone();
-    Button::new(move || if text.props().locked { "Unlock" } else { "Lock" }.to_string())
-        .a11y_label(label)
-        .on_click(move || widget.emit(LockEvent::toggle(widget.props().locked)))
+    view! {
+        <Button a11y_label=label @click=move || widget.emit(LockEvent::toggle(widget.props().locked))>
+            {move || if text.props().locked { "Unlock" } else { "Lock" }.to_string()}
+        </Button>
+    }
 }
 
 impl Render for Lock {

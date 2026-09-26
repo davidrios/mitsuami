@@ -12,6 +12,9 @@
 //!
 //! `platform!` picks each widget's render; the labels show "(native)" only
 //! where it's the platform's own control. The store (`store.rs`) is shared.
+//!
+//! Written with `view!` and `#[component]`; the store is a `Store`, the
+//! app's one instance.
 
 mod lock;
 mod pips_pager;
@@ -24,8 +27,11 @@ use mitsuami::prelude::*;
 fn main() {
     App::new()
         .window("Escape hatches", WindowSize::FitHeight(520.0), || {
-            provide(store::Review::new());
-            Column::new().padding(Spacing::Xl).child(screen::screen())
+            view! {
+                <Column padding=Spacing::Xl>
+                    <screen::Screen/>
+                </Column>
+            }
         })
         .run();
 }

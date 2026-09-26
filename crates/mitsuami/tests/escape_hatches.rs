@@ -24,7 +24,7 @@ use store::Review;
 
 /// Mounts `view` with a fresh store and returns the store.
 fn mount_with_review<V: View>(app: &TestApp, view: impl FnOnce() -> V) -> Review {
-    let store = Review::new();
+    let store = Review::create();
     app.provide(store);
     app.mount(view);
     store
@@ -288,7 +288,7 @@ async fn pips_pagers_select_pages(app: TestApp) {
 
 #[mitsuami_test::test]
 async fn each_platform_has_its_own_widget_native(app: TestApp) {
-    mount_with_review(&app, screen::screen);
+    mount_with_review(&app, screen::Screen::new);
     let native: Vec<String> = ["Lock (native)", "Rating (native)", "Page (native)"]
         .into_iter()
         .filter(|label| app.get_by_text(*label).exists())
@@ -307,7 +307,7 @@ async fn each_platform_has_its_own_widget_native(app: TestApp) {
 
 #[mitsuami_test::test]
 async fn the_screen_drives_the_store(app: TestApp) {
-    let review = mount_with_review(&app, screen::screen);
+    let review = mount_with_review(&app, screen::Screen::new);
     app.expect(by_text("Click the lock to make changes")).to_be_visible().await;
     let rating = app.ui().perform(app.get_by_role(Role::Slider, "Rating").id(), &A11yAction::Increment);
     assert!(rating.is_err(), "locked: the rating can't change");
