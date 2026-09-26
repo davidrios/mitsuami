@@ -1,9 +1,8 @@
 name: Test
 
+# Runs when started by hand (`gh workflow run test.yml --ref <branch>`), and
+# from the release workflow on tags. Not on ordinary pushes.
 on:
-  push:
-    branches: ["**"]
-  pull_request:
   workflow_dispatch:
   workflow_call:
     inputs:

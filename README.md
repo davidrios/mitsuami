@@ -66,6 +66,9 @@ the image defaults to the OS and its version (`macos-26@2x`). CI records its
 own; when a run fails on missing or changed ones, it uploads them, and
 `.github/scripts/accept-snapshots.sh <run id>` accepts them.
 
+CI tests only run when started by hand, `gh workflow run test.yml --ref
+<branch>`, and before a release (headless only) when a tag is pushed.
+
 Stories (`#[mitsuami_test::story]`) render a view in a given state and
 compare a capture with a baseline at each size, in light and dark: see
 `crates/mitsuami/tests/stories.rs`.
