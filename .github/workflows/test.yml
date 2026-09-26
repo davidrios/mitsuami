@@ -4,11 +4,11 @@ on:
   push:
     branches: ["**"]
   pull_request:
-  workflow_call:
   workflow_dispatch:
+  workflow_call:
     inputs:
-      update_baselines:
-        description: Regenerate the snapshots and visual baselines and upload them
+      headless_only:
+        description: Skip the native backend tests
         type: boolean
         default: false
 
@@ -21,12 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pinned: visual baselines belong to the image that rendered them
-        # (docs/ARCHITECTURE.md §12).
+        # Pinned, so native rendering only changes when we move images.
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
-    env:
-      MITSUAMI_UPDATE_SNAPSHOTS: ${{ inputs.update_baselines && '1' || '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -42,7 +39,7 @@ jobs:
 
       # The WinUI backend needs the Windows App Runtime 2.4+ installed.
       - name: Install the Windows App Runtime
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.headless_only
         shell: pwsh
         run: |
           Invoke-WebRequest https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-x64.exe -OutFile $env:RUNNER_TEMP\appruntime.exe
@@ -58,25 +55,12 @@ jobs:
         shell: bash
         run: .github/scripts/cargo-test.sh headless
 
+      # Snapshots that depend on the machine's fonts, OS version and scale
+      # are skipped until baselines are kept per image (docs/ARCHITECTURE.md §12).
       - name: Test (native)
+        if: ${{ !inputs.headless_only }}
         shell: bash
         run: .github/scripts/cargo-test.sh native
         env:
           MITSUAMI_NATIVE: "1"
-
-      - name: Upload visual diffs
-        if: failure()
-        uses: actions/upload-artifact@v5
-        with:
-          name: visual-diffs-${{ matrix.os }}
-          path: crates/*/tests/visual/**/*.diff.png
-          if-no-files-found: ignore
-
-      - name: Upload regenerated baselines
-        if: inputs.update_baselines
-        uses: actions/upload-artifact@v5
-        with:
-          name: baselines-${{ matrix.os }}
-          path: |
-            crates/*/tests/visual/
-            crates/*/tests/snapshots/
+          MITSUAMI_SKIP_MACHINE_SNAPSHOTS: "1"

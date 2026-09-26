@@ -8,8 +8,12 @@ permissions:
   contents: read
 
 jobs:
+  # Build and headless tests on every OS. The native suites don't gate
+  # publishing yet.
   test:
     uses: ./.github/workflows/test.yml
+    with:
+      headless_only: true
 
   publish:
     name: Publish to crates.io

@@ -54,6 +54,7 @@ MITSUAMI_NATIVE=1 cargo test                 # the same tests on the native back
 MITSUAMI_SHOW_WINDOWS=1 MITSUAMI_NATIVE=1 cargo test   # …and watch them
 MITSUAMI_UPDATE_SNAPSHOTS=1 cargo test       # accept snapshot / visual baseline changes
 MITSUAMI_WAIT_MS=5000 cargo test             # longer wait for background work in assertions
+MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1 cargo test # skip native snapshots that depend on fonts, OS and scale (CI)
 ```
 
 Tests control time (`app.advance(..)` moves the clock that `sleep` uses)

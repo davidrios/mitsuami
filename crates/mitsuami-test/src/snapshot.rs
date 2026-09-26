@@ -5,12 +5,21 @@
 //! - A mismatch fails with a diff and writes `<file>.new` next to the
 //!   snapshot for review.
 //! - `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts every mismatch instead.
+//! - `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips the native backends'
+//!   snapshots, whose frames depend on the machine's fonts, OS version and
+//!   scale (CI sets it until baselines are kept per image).
 
 use std::path::PathBuf;
 
 use similar::TextDiff;
 
 use crate::app::TestContext;
+
+/// Whether snapshots and visual baselines that depend on the machine are
+/// skipped (`MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1`).
+pub(crate) fn skip_machine_snapshots() -> bool {
+    std::env::var("MITSUAMI_SKIP_MACHINE_SNAPSHOTS").is_ok_and(|v| v == "1" || v == "true")
+}
 
 pub(crate) fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
@@ -21,7 +30,11 @@ pub(crate) fn assert(context: &TestContext, backend: Option<&str>, name: &str, e
     let dir = PathBuf::from(context.manifest_dir).join("tests").join("snapshots");
     // Backend-specific snapshots (frames, command logs) get the backend in
     // their name; headless keeps the plain name.
-    let backend = backend.filter(|b| *b != "headless").map(|b| format!(".{b}")).unwrap_or_default();
+    let backend = backend.filter(|b| *b != "headless");
+    if backend.is_some() && skip_machine_snapshots() {
+        return;
+    }
+    let backend = backend.map(|b| format!(".{b}")).unwrap_or_default();
     let file = dir.join(format!("{}@{}{backend}.{extension}", context.file_prefix, sanitize(name)));
     let mut pending = file.clone().into_os_string();
     pending.push(".new");

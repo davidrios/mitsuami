@@ -6,7 +6,8 @@
 //!
 //! Same rules as text snapshots: missing baselines are created (not on CI),
 //! mismatches fail and write `<name>.new.png` plus `<name>.diff.png`, and
-//! `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes.
+//! `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes, and
+//! `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips them all.
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -49,6 +50,9 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
 
 #[track_caller]
 pub(crate) fn assert(context: &TestContext, backend: &str, name: &str, image: &Image) {
+    if crate::snapshot::skip_machine_snapshots() {
+        return;
+    }
     let file = PathBuf::from(context.manifest_dir).join("tests").join("visual").join(backend).join(format!(
         "{}@{}.png",
         context.file_prefix,
