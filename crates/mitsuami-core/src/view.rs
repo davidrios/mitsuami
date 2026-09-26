@@ -9,6 +9,10 @@ use crate::widget::{NodeId, Prop, WidgetKind};
 ///
 /// Component functions run once and return a `View`. Building creates the
 /// nodes and the effects that keep their props up to date.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a view",
+    note = "a `view!` tag whose type has `()` or `Without…` in it is missing a required attribute: `props=…` for custom widgets, `when=…` for `Show`, or a component prop"
+)]
 pub trait View: 'static {
     fn build(self, ui: &Ui) -> NodeId;
 }
@@ -42,6 +46,11 @@ impl View for String {
 
 /// Anything that can be a list of children: a view, a tuple of views, a
 /// `Vec`, an `Option`, or `()`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` can't be children",
+    note = "children are views, or tuples, `Vec`s and `Option`s of views",
+    note = "a `view!` tag whose type has `()` or `Without…` in it is missing a required attribute: `props=…` for custom widgets, `when=…` for `Show`, or a component prop"
+)]
 pub trait Children {
     fn into_views(self, out: &mut Vec<AnyView>);
 }

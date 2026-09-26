@@ -192,6 +192,77 @@ async fn many_children_and_several_roots(app: TestApp) {
     assert_eq!(titles(&app), ["one", "two"]);
 }
 
+// --------------------------------------------------------- custom widgets
+
+/// A dot that is on or off; activating it asks to toggle.
+struct Dot;
+
+#[derive(Clone, Debug, PartialEq)]
+struct DotProps {
+    on: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum DotEvent {
+    Toggle,
+}
+
+impl CustomWidget for Dot {
+    const NAME: &'static str = "Dot";
+    type Props = DotProps;
+    type Event = DotEvent;
+
+    fn a11y(props: &DotProps) -> A11yProps {
+        A11yProps::new(Role::Button).value(if props.on { "On" } else { "Off" })
+    }
+
+    fn action(_props: &DotProps, action: &A11yAction) -> Option<DotEvent> {
+        (*action == A11yAction::Activate).then_some(DotEvent::Toggle)
+    }
+}
+
+impl Drawn for Dot {
+    fn measure(_props: &DotProps, _request: &MeasureRequest, _metrics: &PlatformMetrics) -> Size {
+        Size::new(16.0, 16.0)
+    }
+
+    fn draw(props: &DotProps, canvas: &mut Canvas) {
+        let dot = Path::polygon([(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)].map(|(x, y)| Point::new(x, y)));
+        if props.on {
+            canvas.fill(dot, Color::Accent);
+        } else {
+            canvas.stroke(dot, Color::SecondaryLabel, 1.0);
+        }
+    }
+}
+
+impl Render for Dot {
+    fn renderer() -> Renderer<Self> {
+        Renderer::drawn()
+    }
+}
+
+#[mitsuami_test::test]
+async fn custom_widgets_are_tags(app: TestApp) {
+    let on = signal(false);
+    app.mount(move || {
+        view! {
+            <Row gap=8>
+                <Dot props=move || DotProps { on: on.get() } a11y_label="First" @event=move |_| on.update(|on| *on = !*on)/>
+                // Attributes can come before the props.
+                <Dot a11y_label="Second" test_id="second" props=|| DotProps { on: true }/>
+            </Row>
+        }
+    });
+    app.expect(by_role(Role::Button, "First")).to_exist().await;
+    assert_eq!(app.get_by_role(Role::Button, "First").value().as_deref(), Some("Off"));
+    assert_eq!(app.get_by_test_id("second").value().as_deref(), Some("On"));
+
+    app.get_by_role(Role::Button, "First").click().await;
+    assert!(on.get_untracked());
+    assert_eq!(app.get_by_role(Role::Button, "First").value().as_deref(), Some("On"));
+}
+
 // ------------------------------------------------------------- components
 
 /// A counter with a caption, a step, and a callback on every change.

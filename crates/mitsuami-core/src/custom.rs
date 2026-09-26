@@ -303,9 +303,13 @@ impl fmt::Debug for CustomProps {
 
 /// A custom widget in the view tree: `Custom::<Rating>::new(props)`, or
 /// `Rating::view(props)` through [`CustomView`].
-pub struct Custom<W: CustomWidget> {
+///
+/// `P` is the props: `Value<W::Props>`, or `()` for a `<Rating …>` tag in
+/// `view!` whose `props=…` isn't set yet. Only a widget with props is a
+/// [`View`].
+pub struct Custom<W: CustomWidget, P = Value<<W as CustomWidget>::Props>> {
     element: Element,
-    props: Value<W::Props>,
+    props: P,
     renderer: Renderer<W>,
     force_drawn: bool,
     force_composed: bool,
@@ -324,9 +328,15 @@ impl<W: Render> Custom<W> {
     }
 }
 
-impl<W: CustomWidget> Custom<W> {
+impl<W: CustomWidget, P> Custom<W, P> {
+    /// Sets the props; usually reactive: `move || RatingProps { … }`.
+    pub fn props(self, props: impl IntoValue<W::Props>) -> Custom<W> {
+        let Custom { element, props: _, renderer, force_drawn, force_composed } = self;
+        Custom { element, props: props.into_value(), renderer, force_drawn, force_composed }
+    }
+
     /// Uses the drawn render even where a native one exists.
-    pub fn drawn(mut self) -> Custom<W>
+    pub fn drawn(mut self) -> Custom<W, P>
     where
         W: Drawn,
     {
@@ -337,13 +347,13 @@ impl<W: CustomWidget> Custom<W> {
 
     /// Uses the composed render even where another one exists. Panics at
     /// build time if the widget has none.
-    pub fn composed(mut self) -> Custom<W> {
+    pub fn composed(mut self) -> Custom<W, P> {
         self.force_composed = true;
         self
     }
 
     /// Called with each event the widget emits.
-    pub fn on_event(mut self, handler: impl Fn(&W::Event) + 'static) -> Custom<W> {
+    pub fn on_event(mut self, handler: impl Fn(&W::Event) + 'static) -> Custom<W, P> {
         self.element.on(move |event| {
             if let UiEvent::Custom(value) = event
                 && let Some(event) = value.downcast_ref::<W::Event>()
@@ -355,7 +365,7 @@ impl<W: CustomWidget> Custom<W> {
     }
 }
 
-impl<W: CustomWidget> ElementBuilder for Custom<W> {
+impl<W: CustomWidget, P> ElementBuilder for Custom<W, P> {
     fn element(&mut self) -> &mut Element {
         &mut self.element
     }
@@ -417,6 +427,18 @@ fn build_composed<W: CustomWidget>(
 pub trait CustomView: Render {
     fn view(props: impl IntoValue<Self::Props>) -> Custom<Self> {
         Custom::new(props)
+    }
+
+    /// `<Rating props=… @event=…/>` in `view!`: the widget before its props.
+    #[doc(hidden)]
+    fn __tag() -> Custom<Self, ()> {
+        Custom {
+            element: Element::new(WidgetKind::Custom(Self::NAME)),
+            props: (),
+            renderer: Self::renderer(),
+            force_drawn: false,
+            force_composed: false,
+        }
     }
 }
 
