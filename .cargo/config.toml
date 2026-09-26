@@ -1,0 +1,4 @@
+[alias]
+# `cargo mitsuami …` runs this workspace's CLI, so it's always the current
+# one. Apps install it instead: `cargo install cargo-mitsuami`.
+mitsuami = "run --quiet --package cargo-mitsuami --"
