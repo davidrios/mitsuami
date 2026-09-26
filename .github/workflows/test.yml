@@ -86,17 +86,20 @@ jobs:
 
   # The Qt Quick and Kirigami backend (the `kde` feature) on its own:
   # Kirigami 6 isn't packaged for Ubuntu 24.04, so this runs in an Arch Linux
-  # container. Arch is rolling, so its native snapshots and baselines
-  # (tests/{snapshots,visual}/kirigami/archlinux/) can change with Qt and KDE
-  # updates. GTK 4 is there too: the test kit depends on it on Linux.
+  # container. Arch is rolling: the container and its packages are pinned to
+  # one day of the Arch Linux Archive, so native rendering only changes when
+  # we move that date (in the image, the mirror and MITSUAMI_IMAGE, together:
+  # the baselines live under tests/{snapshots,visual}/kirigami/<image>/).
+  # GTK 4 is there too: the test kit depends on it on Linux.
   kde:
     name: Test (KDE Plasma)
     if: ${{ !inputs.headless_only }}
     runs-on: ubuntu-24.04
-    container: archlinux:base-devel
+    container: archlinux:base-devel-20260920.0.596911
     steps:
       - name: Install Qt, Kirigami, Breeze and GTK 4
         run: |
+          echo 'Server = https://archive.archlinux.org/repos/2026/09/20/$repo/os/$arch' > /etc/pacman.d/mirrorlist
           pacman -Syu --noconfirm --needed git rustup qt6-declarative kirigami qqc2-desktop-style \
             breeze breeze-icons noto-fonts gtk4
 
@@ -114,7 +117,7 @@ jobs:
             --features mitsuami/kde,mitsuami-test/kde,mitsuami-kirigami/qt
         env:
           MITSUAMI_NATIVE: "1"
-          MITSUAMI_IMAGE: archlinux
+          MITSUAMI_IMAGE: archlinux-2026.09.20
 
       - name: Collect snapshots for review
         if: failure()
@@ -127,6 +130,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: snapshots-archlinux-kde
+          name: snapshots-archlinux-2026.09.20-kde
           path: snapshots.tar
           if-no-files-found: ignore
