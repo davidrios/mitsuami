@@ -66,5 +66,9 @@ harness = false
 name = "stores"
 harness = false
 
+[[test]]
+name = "todos"
+harness = false
+
 [lints]
 workspace = true

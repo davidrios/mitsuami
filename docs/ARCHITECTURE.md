@@ -433,20 +433,20 @@ fn Counter(initial: i32) -> impl View {
 }
 ```
 
-The builder API is the real API. `view!` expands to it, one tag at a time: `<Tag a=x @e=h flag>children</Tag>` is `Tag::__tag().a(x).on_e(h).flag().__children(move || children)`. So the counter is:
+The builder API is the real API. `view!` expands to it, one tag at a time: `<Tag a=x @e=h flag>children</Tag>` is `Tag::__tag().a(x).on_e(h).flag().__children(|| children)`. So the counter is:
 
 ```rust
-Column::__tag().gap(Spacing::Md).padding(2.em()).align(Align::Center).__children(move || (
-    Text::__tag().text_style(TextStyle::Title).__children(move || move || format!("Count: {}", count.get())),
-    Button::__tag().variant(ButtonVariant::Primary).on_click(move || count.update(|c| *c += 1)).__children(move || "Increment"),
-    Show::__tag().when(move || doubled.get() > 10).__children(move || Text::__tag().__children(move || "That's a big number")),
+Column::__tag().gap(Spacing::Md).padding(2.em()).align(Align::Center).__children(|| (
+    Text::__tag().text_style(TextStyle::Title).__children(|| move || format!("Count: {}", count.get())),
+    Button::__tag().variant(ButtonVariant::Primary).on_click(move || count.update(|c| *c += 1)).__children(|| "Increment"),
+    Show::__tag().when(move || doubled.get() > 10).__children(move || Text::__tag().__children(|| "That's a big number")),
 ))
 ```
 
 which builds the same tree as `Column::new().gap(…).children((Text::new(…).text_style(…), Button::new("Increment")…, Show::new(…, …)))`.
 
 - **Attributes are builder methods,** checked by the compiler like any call. Values are literals, paths, calls, method chains and closures; anything else goes in braces. A `>` ends the tag, so comparisons need braces: `when={a > b}`. Enum values are written with their type (`Align::Center`): a macro can't infer types.
-- **Children** are passed in a closure, which is how `Show` rebuilds a branch and `For` renders a row (`let:item` names the row's parameter). Containers call it once. One child is passed as is, which gives `Text` its text and `Button` its label; several become a tuple.
+- **Children** are passed in a closure, which is how `Show` rebuilds a branch and `For` renders a row (`let:item` names the row's parameter). Other tags call it right away, so their children are built like the builder API's and siblings can share variables; only `Show` and `For` get a `move` closure, which owns what it uses. One child is passed as is, which gives `Text` its text and `Button` its label; several become a tuple.
 - **Required attributes are types.** `<Show>` is `ShowWithoutWhen` until `when` is set, and only a `Show` has children. `<For>` wants `each`, then `key`.
 - **Custom widgets are tags too:** `<Rating props=move || RatingProps { … } a11y_label="Rating" @event=move |e| …/>`. The tag is a `Custom<Rating, ()>` until `props` is set, and only then a `View`.
 - **Mistakes are compile errors** that point at the tag or attribute: an unknown attribute is an unknown method (with rustc's "did you mean"), and a tag missing a required attribute isn't a `View`; the error's note says so.

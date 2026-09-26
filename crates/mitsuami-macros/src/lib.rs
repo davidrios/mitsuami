@@ -26,7 +26,7 @@ mod view;
 /// ```
 ///
 /// A tag `<Tag a=x @e=h flag>children</Tag>` becomes
-/// `Tag::__tag().a(x).on_e(h).flag().__children(move || children)`:
+/// `Tag::__tag().a(x).on_e(h).flag().__children(|| children)`:
 ///
 /// - `name=value` calls the builder method `name`. The value is a literal,
 ///   a path, a call or method chain, a closure, or any expression in
@@ -37,6 +37,10 @@ mod view;
 /// - Children are string literals, `{expressions}` and tags. One child is
 ///   passed as is (the text of a `Text`, the label of a `Button`); several
 ///   become a tuple.
+/// - Children are built right away, as with the builder API, except in
+///   `Show` and `For`, which rebuild them: there they're in a `move`
+///   closure, which owns what it uses (clone a `String` before, as you
+///   would for `Show::new`).
 ///
 /// Several root nodes, or `<>…</>`, make a tuple.
 #[proc_macro]

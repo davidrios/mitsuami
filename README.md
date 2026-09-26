@@ -60,8 +60,12 @@ Tests control time (`app.advance(..)` moves the clock that `sleep` uses)
 and answer dialogs through scripted services (`app.services()`), so they
 never open real dialogs or touch your clipboard.
 
-Try the example apps with `cargo run -p mitsuami --example showcase` and
-`cargo run -p mitsuami --example escape_hatches`.
+Try the example apps with `cargo run -p mitsuami --example <name>`:
+
+- `todos`: components, `view!`, a store, a resource and an action.
+- `showcase`: a counter, a form, menus and a dialog, with the builder API.
+- `escape_hatches`: custom widgets that are native where the platform has
+  the control, and `platform!`.
 
 On Linux, building needs the GTK 4 development files (4.10 or newer), and
 native tests need `gtk4-broadwayd`, GTK's in-memory display server: tests

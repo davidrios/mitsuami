@@ -172,6 +172,25 @@ async fn attribute_values_can_be_any_expression(app: TestApp) {
 }
 
 #[mitsuami_test::test]
+async fn siblings_can_share_variables(app: TestApp) {
+    app.mount(|| {
+        let name = "Ada".to_string();
+        // Children are built right away, like the builder's: the first
+        // child borrows `name`, the last one takes it.
+        view! {
+            <Column>
+                <Text>{format!("Hello, {name}")}</Text>
+                <Row><Button a11y_label=format!("Greet {name}")>"Greet"</Button></Row>
+                <Text>{name}</Text>
+            </Column>
+        }
+    });
+    app.expect(by_text("Hello, Ada")).to_exist().await;
+    app.expect(by_role(Role::Button, "Greet Ada")).to_exist().await;
+    app.expect(by_text("Ada")).to_exist().await;
+}
+
+#[mitsuami_test::test]
 async fn many_children_and_several_roots(app: TestApp) {
     app.mount(|| {
         view! {
