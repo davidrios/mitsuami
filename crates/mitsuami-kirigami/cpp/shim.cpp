@@ -208,6 +208,11 @@ void mq_init(mq_callback callback) {
     // Kirigami apps use QApplication: the desktop style draws with QStyle.
     auto* app = new QApplication(argc, argv);
     app->setQuitOnLastWindowClosed(false);
+    // Outside Plasma no platform theme picks the widget style, and Qt falls
+    // back to Fusion; KDE apps pick Breeze then (KStyleManager), and so do we.
+    const QString theme = qEnvironmentVariable("QT_QPA_PLATFORMTHEME");
+    const bool plasma = theme.isEmpty() ? qEnvironmentVariable("XDG_CURRENT_DESKTOP").contains("KDE") : theme == "kde";
+    if (!plasma && qEnvironmentVariableIsEmpty("QT_STYLE_OVERRIDE")) QApplication::setStyle("breeze");
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) QQuickStyle::setStyle("org.kde.desktop");
     g_main_thread = QThread::currentThread();
     g_engine = new QQmlEngine();
