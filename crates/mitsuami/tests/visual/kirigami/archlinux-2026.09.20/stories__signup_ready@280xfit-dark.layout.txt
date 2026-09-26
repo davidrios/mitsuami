@@ -1,0 +1,7 @@
+Window "mitsuami test" [0,0 280×183]
+  Container [0,0 280×183]
+    TextInput placeholder="Your name" [16,16 248×35]
+    TextInput value="ada@example.com" [16,59 248×35]
+    Checkbox "I agree to the terms" checked=true [16,102 146×23]
+    Container [16,133 248×34]
+      Button "Sign up" enabled=true variant=Primary [180,133 84×34]
