@@ -583,10 +583,13 @@ impl State {
             }
             Command::SetFrame { id, frame } => {
                 let view = self.view(*id, command);
-                view.setFrame(NSRect::new(
+                // Layout places what the user sees, the alignment rect, as
+                // Auto Layout does; controls draw their bezels inset from
+                // their frames (a push button by 7pt a side before macOS 26).
+                view.setFrame(view.frameForAlignmentRect(NSRect::new(
                     NSPoint::new(frame.x() as f64, frame.y() as f64),
                     NSSize::new(frame.width() as f64, frame.height() as f64),
-                ));
+                )));
             }
             Command::SetA11y { id, a11y } => {
                 let view = self.view(*id, command);
@@ -938,7 +941,7 @@ impl Backend for AppKitBackend {
         props.extend(node.text_style.map(Prop::TextStyle));
         props.extend(node.variant.map(Prop::Variant));
         let view = node.widget.view();
-        let f = view.frame();
+        let f = view.alignmentRectForFrame(view.frame());
         let by_view = state.by_view.borrow();
         let (children, scroll_offset) = match &node.widget {
             Widget::Scroll(scroll) => {
