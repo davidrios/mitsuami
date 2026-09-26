@@ -9,6 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+getrandom = "0.4.3"
 similar.workspace = true
 
 [lints]

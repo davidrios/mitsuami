@@ -4,25 +4,30 @@
 //! Every request needs the token from the page's URL, so other pages open
 //! in the browser can't act on the baselines.
 
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 
 use crate::changes::Change;
 use crate::report::{self, Mode};
 
-/// A token no other page can guess: two randomly seeded hashes.
-fn token() -> String {
-    let random = || RandomState::new().build_hasher().finish();
-    format!("{:016x}{:016x}", random(), random())
+/// A token no other page can guess: 128 bits from the OS's secure RNG.
+fn token() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| io::Error::other(format!("no secure random numbers: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Compares in constant time, so response times say nothing about how
+/// much of a guess was right.
+fn same_token(given: &str, token: &str) -> bool {
+    given.len() == token.len() && given.bytes().zip(token.bytes()).fold(0, |diff, (a, b)| diff | (a ^ b)) == 0
 }
 
 /// Serves the review of `changes` on `port` (0 for any free port) until
 /// the page says it's done. `ready` gets the page's URL.
 pub fn serve(changes: &[Change], port: u16, ready: impl FnOnce(&str)) -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
-    let token = token();
+    let token = token()?;
     let url = format!("http://127.0.0.1:{}/?token={token}", listener.local_addr()?.port());
     ready(&url);
     for stream in listener.incoming() {
@@ -53,7 +58,7 @@ fn handle(mut stream: TcpStream, changes: &[Change], token: &str) -> io::Result<
     let mut parts = request.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if !query.split('&').any(|pair| pair.strip_prefix("token=") == Some(token)) {
+    if !query.split('&').any(|pair| pair.strip_prefix("token=").is_some_and(|given| same_token(given, token))) {
         return respond(&mut stream, 403, "text/plain", b"forbidden").map(|_| Flow::Continue);
     }
     let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
