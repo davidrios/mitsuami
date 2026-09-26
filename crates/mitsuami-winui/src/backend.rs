@@ -938,6 +938,12 @@ impl State {
             }
             WidgetKind::Switch => {
                 let switch = w::ToggleSwitch::new()?;
+                // Just the track: its label is its own node. By default it
+                // shows "On"/"Off" beside the track and is at least 154 wide.
+                let iface: w::IToggleSwitch = switch.cast()?;
+                iface.SetOnContent(None::<&IInspectable>)?;
+                iface.SetOffContent(None::<&IInspectable>)?;
+                switch.cast::<w::IFrameworkElement>()?.SetMinWidth(0.0)?;
                 let (emitter, shown) = (emitter.clone(), shown_checked.clone());
                 revokers.push(switch.cast::<w::IToggleSwitch>()?.Toggled(move |sender, _| {
                     let Some(value) = sender.as_ref().and_then(|s| s.cast::<w::IToggleSwitch>().ok()?.IsOn().ok())

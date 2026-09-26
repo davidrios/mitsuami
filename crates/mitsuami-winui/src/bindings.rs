@@ -5098,6 +5098,30 @@ impl IToggleSwitch {
     pub fn SetIsOn(&self, value: bool) -> windows_core::Result<()> {
         unsafe { (windows_core::Interface::vtable(self).SetIsOn)(windows_core::Interface::as_raw(self), value).ok() }
     }
+    pub fn SetOnContent<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<windows_core::IInspectable>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetOnContent)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn SetOffContent<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<windows_core::IInspectable>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetOffContent)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
     pub fn Toggled<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
     where
         F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<RoutedEventArgs>) + 'static,
@@ -5135,11 +5159,13 @@ pub struct IToggleSwitch_Vtbl {
     HeaderTemplate: usize,
     SetHeaderTemplate: usize,
     OnContent: usize,
-    SetOnContent: usize,
+    pub SetOnContent:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
     OnContentTemplate: usize,
     SetOnContentTemplate: usize,
     OffContent: usize,
-    SetOffContent: usize,
+    pub SetOffContent:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
     OffContentTemplate: usize,
     SetOffContentTemplate: usize,
     TemplateSettings: usize,
