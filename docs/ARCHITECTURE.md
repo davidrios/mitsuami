@@ -629,7 +629,7 @@ This is exposed as `Backend::capture`.
 
 **Diffing.**
 - Perceptual diff: pixelmatch's. Colours are compared by their distance in YIQ, and pixels that differ only by anti-aliasing don't count. `VisualOptions` (the story options of the same names) sets the `threshold` for how different a colour must look (0.1 by default), `max_changed` for the fraction of pixels that may change (0.1% by default), and regions to leave out: nodes found by a query, where they are at capture time (`ignore(by_test_id("clock"))`; a node whose content changes needs a fixed size, so the baseline's content is in the same region), or rects in window coordinates. The `.diff.png` shows changes in red, anti-aliasing in yellow and ignored regions in blue.
-- A **layout-only diff** from the wireframe snapshot runs first. It says *why* pixels moved: a layout change versus a native rendering change.
+- A **layout diff** says *why* pixels moved: a layout change versus a native rendering change. Each baseline has the layout it was captured with next to it, `<name>.layout.txt` (the tree snapshot's format: every node's kind, props and frame), recorded and accepted with the PNG. When pixels change, the failure lists the nodes whose layout or props differ, or says the layout is the same and the platform draws it differently. A layout change alone doesn't fail: the pixels are what's compared, and the recorded layout follows along when updating.
 
 **Review.**
 - `cargo mitsuami visual review` generates a local HTML report: side-by-side, overlay, onion-skin and diff-highlight views, and accept/reject per change. Accepting updates the baselines.

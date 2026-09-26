@@ -10,6 +10,12 @@
 //! too, which uploads them), `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes,
 //! and `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips them all.
 //!
+//! Each baseline has the layout it was captured with next to it,
+//! `<name>.layout.txt` (the tree snapshot's format). It is a baseline too,
+//! recorded and accepted with the PNG. When pixels change, comparing it
+//! with the current layout says why: the layout moved, or the platform
+//! draws the same layout differently. It never fails on its own.
+//!
 //! The diff is pixelmatch's: colours are compared by their distance in YIQ,
 //! which follows how different they look, and pixels that differ only by
 //! anti-aliasing (an edge that moved by a fraction of a pixel, a glyph
@@ -114,12 +120,52 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(format!("{stem}.{suffix}.png"))
 }
 
-/// `ignored` holds the regions to leave out, in window coordinates.
+/// `<name>.layout.txt`, and its pending `<name>.layout.txt.new`.
+fn layout_files(png: &Path) -> (PathBuf, PathBuf) {
+    let stem = png.file_stem().unwrap_or_default().to_string_lossy();
+    (png.with_file_name(format!("{stem}.layout.txt")), png.with_file_name(format!("{stem}.layout.txt.new")))
+}
+
+fn write_text(path: &Path, text: &str) {
+    std::fs::write(path, text).unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+}
+
+/// Why the pixels changed, from the layouts: the lines that differ, or
+/// that the layout didn't change.
+fn explain(expected: Option<&str>, actual: &str) -> String {
+    const MAX_LINES: usize = 12;
+    let Some(expected) = expected else {
+        return "the baseline has no layout recorded to compare with".to_owned();
+    };
+    if expected == actual {
+        return "the layout is the same: the platform draws it differently".to_owned();
+    }
+    let diff = similar::TextDiff::from_lines(expected, actual);
+    let mut lines: Vec<String> = Vec::new();
+    for change in diff.iter_all_changes() {
+        let sign = match change.tag() {
+            similar::ChangeTag::Equal => continue,
+            similar::ChangeTag::Delete => '-',
+            similar::ChangeTag::Insert => '+',
+        };
+        lines.push(format!("{sign} {}", change.value().trim_end()));
+    }
+    let more = lines.len().saturating_sub(MAX_LINES);
+    lines.truncate(MAX_LINES);
+    if more > 0 {
+        lines.push(format!("… and {more} more"));
+    }
+    format!("the layout changed:\n{}", lines.join("\n"))
+}
+
+/// `ignored` holds the regions to leave out, in window coordinates, and
+/// `layout` is the window's tree as the tree snapshot formats it.
 pub(crate) fn assert(
     context: &TestContext,
     machine: &Path,
     name: &str,
     image: &Image,
+    layout: &str,
     options: &VisualOptions,
     ignored: &[Rect],
 ) {
@@ -133,12 +179,14 @@ pub(crate) fn assert(
     ));
     let pending = sibling(&file, "new");
     let diff_path = sibling(&file, "diff");
+    let (layout_file, layout_pending) = layout_files(&file);
     let update = crate::snapshot::updating();
     let ci = crate::snapshot::on_ci();
 
     let Some((width, height, expected)) = read_png(&file) else {
         if ci && !update {
             write_png(&pending, image.width, image.height, &image.rgba);
+            write_text(&layout_pending, layout);
             context.fail_snapshot(format!(
                 "visual baseline {} is missing (not created on CI); the capture is in {}",
                 file.display(),
@@ -147,10 +195,13 @@ pub(crate) fn assert(
             return;
         }
         write_png(&file, image.width, image.height, &image.rgba);
+        write_text(&layout_file, layout);
         eprintln!("mitsuami-test: created visual baseline {}", file.display());
         return;
     };
+    let expected_layout = std::fs::read_to_string(&layout_file).ok();
 
+    let _ = std::fs::remove_file(&diff_path);
     let problem = if (width, height) != (image.width, image.height) {
         Some(format!("size changed from {width}×{height} to {}×{}", image.width, image.height))
     } else {
@@ -173,19 +224,42 @@ pub(crate) fn assert(
         None => {
             let _ = std::fs::remove_file(&pending);
             let _ = std::fs::remove_file(&diff_path);
+            // The pixels are what's compared: a layout that differs only
+            // follows along when updating.
+            match expected_layout {
+                Some(expected) if expected == layout => {}
+                Some(_) if !update => {}
+                // A baseline from before layouts were recorded.
+                None if ci && !update => {
+                    write_text(&layout_pending, layout);
+                    context.fail_snapshot(format!(
+                        "visual baseline {} has no layout (not created on CI); it is in {}",
+                        file.display(),
+                        layout_pending.display()
+                    ));
+                    return;
+                }
+                _ => write_text(&layout_file, layout),
+            }
+            let _ = std::fs::remove_file(&layout_pending);
         }
         Some(_) if update => {
             write_png(&file, image.width, image.height, &image.rgba);
+            write_text(&layout_file, layout);
             let _ = std::fs::remove_file(&pending);
             let _ = std::fs::remove_file(&diff_path);
+            let _ = std::fs::remove_file(&layout_pending);
         }
         Some(problem) => {
             write_png(&pending, image.width, image.height, &image.rgba);
+            write_text(&layout_pending, layout);
+            let why = explain(expected_layout.as_deref(), layout);
+            // Captures of different sizes have no diff image.
+            let diff = if diff_path.exists() { format!("\ndiff: {}", diff_path.display()) } else { String::new() };
             context.fail_snapshot(format!(
-                "visual baseline {} does not match: {problem}\nnew: {}\ndiff: {}",
+                "visual baseline {} does not match: {problem}\n{why}\nnew: {}{diff}",
                 file.display(),
-                pending.display(),
-                diff_path.display()
+                pending.display()
             ));
         }
     }

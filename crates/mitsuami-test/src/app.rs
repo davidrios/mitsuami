@@ -320,7 +320,8 @@ impl TestApp {
         match self.drive(capture) {
             Ok(image) => {
                 let machine = self.machine_dir().expect("only native backends capture");
-                visual::assert(&self.context, &machine, name, &image, options, &ignored)
+                let layout = format::tree(&self.inspect());
+                visual::assert(&self.context, &machine, name, &image, &layout, options, &ignored)
             }
             Err(mitsuami_core::backend::CaptureError::Unsupported) => {}
             Err(e) => panic!("cannot capture the window: {e:?}"),
