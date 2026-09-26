@@ -9,8 +9,8 @@ use mitsuami::prelude::*;
 use crate::store::Todos;
 
 pub const QUOTES: [&str; 3] = [
-    "Simple things should be simple, complex things should be possible.",
     "Make it work, make it right, make it fast.",
+    "Simple things should be simple, complex things should be possible.",
     "The best code is no code at all.",
 ];
 
