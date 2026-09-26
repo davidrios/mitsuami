@@ -28,7 +28,7 @@ jobs:
     env:
       MITSUAMI_UPDATE_SNAPSHOTS: ${{ inputs.update_baselines && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup toolchain install
@@ -52,17 +52,21 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets
 
+      # Failures are also posted as annotations, so they show on the run's
+      # summary page without digging through the log.
       - name: Test (headless)
-        run: cargo test --workspace
+        shell: bash
+        run: .github/scripts/cargo-test.sh headless
 
       - name: Test (native)
-        run: cargo test --workspace
+        shell: bash
+        run: .github/scripts/cargo-test.sh native
         env:
           MITSUAMI_NATIVE: "1"
 
       - name: Upload visual diffs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: visual-diffs-${{ matrix.os }}
           path: crates/*/tests/visual/**/*.diff.png
@@ -70,7 +74,7 @@ jobs:
 
       - name: Upload regenerated baselines
         if: inputs.update_baselines
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: baselines-${{ matrix.os }}
           path: |
