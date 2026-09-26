@@ -37,9 +37,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgtk-4-bin
 
-      # The WinUI backend needs the Windows App Runtime 2.4+ installed.
+      # The WinUI backend needs the Windows App Runtime 2.4+ installed, even
+      # headless: its services tests always use the real services.
       - name: Install the Windows App Runtime
-        if: runner.os == 'Windows' && !inputs.headless_only
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Invoke-WebRequest https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-x64.exe -OutFile $env:RUNNER_TEMP\appruntime.exe
