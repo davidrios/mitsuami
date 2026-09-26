@@ -1,6 +1,6 @@
 //! Starting an app on the native backend of the target platform.
 
-use mitsuami_core::{AnyView, Ui, UiEvent, View, WindowSize};
+use mitsuami_core::{AnyView, Ui, UiEvent, View, WindowSize, provide_stores};
 use mitsuami_reactive::{Owner, provide};
 
 struct WindowSpec {
@@ -43,10 +43,13 @@ impl App {
         let windows = self.windows;
         let setup = move |ui: &Ui| {
             // The app scope makes the Ui available to every component
-            // (`inject::<Ui>()`, `spawn_local`, `sleep`); it lives as long
-            // as the app.
+            // (`inject::<Ui>()`, `spawn_local`, `sleep`) and holds the
+            // stores; it lives as long as the app.
             let app = Owner::new_root();
-            app.with(|| provide(ui.clone()));
+            app.with(|| {
+                provide(ui.clone());
+                provide_stores();
+            });
             for spec in windows {
                 open(ui, app, spec);
             }

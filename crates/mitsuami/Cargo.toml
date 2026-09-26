@@ -62,5 +62,9 @@ harness = false
 name = "macros"
 harness = false
 
+[[test]]
+name = "stores"
+harness = false
+
 [lints]
 workspace = true

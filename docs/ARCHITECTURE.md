@@ -385,10 +385,13 @@ impl Render for Rating {
 ## 8. App logic and state ("backend behaviour is the same")
 
 - Domain logic is **plain Rust**: no mitsuami dependency, `Send` where useful, async-friendly, and testable through its own public API.
-- **Stores** (Pinia-like) are the UI-thread adapter. They own signals and expose actions that call into domain logic.
-- **Async** uses plain futures: `spawn_local`, `spawn_blocking` and `sleep` (built), plus `alert`, `open_file` and `save_file` for dialogs.
-- **Resources and actions** (M5) will wrap these: `resource(fetch_fn)` returns a `{ loading, data, error }` signal set, and `action(fn)` gives pending-state tracking.
-- `provide` / `inject` replaces globals, so screens can be tested with mock stores.
+- **Stores** (Pinia-like) are the UI-thread adapter. They own signals and expose actions that call into domain logic. A store is a plain `Clone` struct implementing `Store` (`fn create() -> Self`); `use_store::<S>()` returns the app's one instance, created on first use in a scope that lives as long as the app (`App` and `TestApp` call `provide_stores()` in their app scope), so a store outlives the views that use it, and its resources and tasks keep running.
+- **Async** uses plain futures: `spawn_local`, `spawn_blocking` and `sleep`, plus `alert`, `open_file` and `save_file` for dialogs.
+- **Resources and actions** wrap these as signals, all `Copy`:
+  - `resource(fetch)` / `resource_on(source, fetch)` load a `Result<T, E>`: `loading()`, `data()`, `error()`, `refetch()`, `set_data()`. They fetch when created, and `resource_on` again whenever the signals `source` reads change. A new fetch cancels the one in flight. The last data stays available while reloading and after an error, so views can show both.
+  - `action(fn)` runs an async operation on `dispatch(input)`: `pending()` while any dispatch runs, and `value()` of the latest dispatch (an earlier one finishing later doesn't overwrite it).
+  - Both are owned by the scope that created them: disposing it cancels what's in flight.
+- `provide` / `inject` replaces globals, so screens can be tested with mock stores: a store `provide`d in a scope takes precedence over the app's instance there.
 
 Every per-platform screen (§6.1) consumes the same stores and composables. That is the reuse boundary.
 

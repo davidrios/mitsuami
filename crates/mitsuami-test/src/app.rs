@@ -51,7 +51,10 @@ impl TestApp {
         let (fake, services) = FakeServices::new();
         ui.set_services(Box::new(fake));
         let owner = Owner::new_root();
-        owner.with(|| mitsuami_reactive::provide(ui.clone()));
+        owner.with(|| {
+            mitsuami_reactive::provide(ui.clone());
+            mitsuami_core::provide_stores();
+        });
         TestApp { ui, clock, services, driver, owner, window: Cell::new(None), context }
     }
 

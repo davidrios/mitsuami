@@ -75,6 +75,7 @@ pub mod prelude {
         A11yAction, A11yProps, Canvas, Color, Composed, Custom, CustomView, CustomWidget, Drawn, MeasureRequest, Path,
         PlatformMetrics, PointerEvent, PointerKind, Rect, Render, Renderer, Shape,
     };
+    pub use mitsuami_core::{Action, Resource, Store, action, resource, resource_on, use_store};
     pub use mitsuami_core::{
         Align, ButtonVariant, Callback, Children, Element, ElementBuilder, FlexDirection, For, GridPlacement, Justify,
         Length, LengthExt, NodeId, Point, Role, Show, Size, Slot, Spacing, TextDirection, TextStyle, Track, Ui, View,
