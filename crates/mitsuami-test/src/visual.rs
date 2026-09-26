@@ -69,7 +69,8 @@ impl VisualOptions {
 
     /// Leaves out the frames of the nodes `query` finds, where they are at
     /// capture time: a blinking caret's field, a clock. The query must find
-    /// at least one node.
+    /// at least one node. The baseline's pixels are left out in the same
+    /// region, so give a node whose content changes a fixed size.
     pub fn ignore(mut self, query: Query) -> VisualOptions {
         self.ignore.push(query);
         self

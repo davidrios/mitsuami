@@ -7,7 +7,9 @@ use mitsuami_test::prelude::*;
 fn clock(time: Signal<&'static str>) -> impl View {
     Column::new().padding(16).gap(8).align(Align::Start).children((
         Text::new("Last synced").text_style(TextStyle::Headline),
-        Text::new(move || time.get().to_owned()).test_id("clock"),
+        // A fixed width: the region left out is where the node is at capture
+        // time, and the baseline's text must be inside it too.
+        Text::new(move || time.get().to_owned()).width(80).test_id("clock"),
     ))
 }
 
