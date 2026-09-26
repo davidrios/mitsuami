@@ -68,17 +68,18 @@ jobs:
 
       # Missing and changed snapshots, and the diffs, at their paths in the
       # repository. `.github/scripts/accept-snapshots.sh <run id>` accepts them.
+      # The archive path is relative: GNU tar reads `D:\…` as a remote host.
       - name: Collect snapshots for review
         if: failure()
         shell: bash
         run: |
           find crates -path '*/tests/*' \( -name '*.new' -o -name '*.new.png' -o -name '*.diff.png' \) -print0 \
-            | tar --null -cf "$RUNNER_TEMP/snapshots.tar" -T -
+            | tar --null -cf snapshots.tar -T -
 
       - name: Upload snapshots for review
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: snapshots-${{ matrix.os }}
-          path: ${{ runner.temp }}/snapshots.tar
+          path: snapshots.tar
           if-no-files-found: ignore
