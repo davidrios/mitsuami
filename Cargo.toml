@@ -18,6 +18,7 @@ mitsuami-widgets = { path = "crates/mitsuami-widgets" }
 mitsuami-headless = { path = "crates/mitsuami-headless" }
 mitsuami-test = { path = "crates/mitsuami-test" }
 mitsuami-test-macros = { path = "crates/mitsuami-test-macros" }
+mitsuami-macros = { path = "crates/mitsuami-macros" }
 mitsuami-appkit = { path = "crates/mitsuami-appkit" }
 mitsuami-gtk = { path = "crates/mitsuami-gtk" }
 mitsuami-winui = { path = "crates/mitsuami-winui" }

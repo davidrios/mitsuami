@@ -4,13 +4,26 @@
 //! ```ignore
 //! use mitsuami::prelude::*;
 //!
+//! #[component]
 //! fn Counter(initial: i32) -> impl View {
 //!     let count = signal(initial);
-//!     Column::new().gap(Spacing::Md).padding(2.em()).children((
-//!         Text::new(move || format!("Count: {}", count.get())).text_style(TextStyle::Title),
-//!         Button::new("Increment").on_click(move || count.update(|c| *c += 1)),
-//!     ))
+//!     view! {
+//!         <Column gap=Spacing::Md padding=2.em()>
+//!             <Text text_style=TextStyle::Title>{move || format!("Count: {}", count.get())}</Text>
+//!             <Button @click=move || count.update(|c| *c += 1)>"Increment"</Button>
+//!         </Column>
+//!     }
 //! }
+//! ```
+//!
+//! [`view!`] and [`#[component]`](component) are sugar: they expand to the
+//! builder API, which works on its own.
+//!
+//! ```ignore
+//! Column::new().gap(Spacing::Md).padding(2.em()).children((
+//!     Text::new(move || format!("Count: {}", count.get())).text_style(TextStyle::Title),
+//!     Button::new("Increment").on_click(move || count.update(|c| *c += 1)),
+//! ))
 //! ```
 //!
 //! The platform backend is chosen by target OS: AppKit on macOS, GTK 4 on
@@ -31,6 +44,7 @@ mod platforms;
 
 pub use app::App;
 pub use mitsuami_core as core;
+pub use mitsuami_macros::{component, view};
 pub use mitsuami_reactive as reactive;
 pub use mitsuami_widgets as widgets;
 
@@ -50,7 +64,7 @@ pub use mitsuami_gtk as gtk;
 pub use mitsuami_winui as winui;
 
 pub mod prelude {
-    pub use crate::{App, platform};
+    pub use crate::{App, component, platform, view};
     pub use mitsuami_core::draw::DisplayList;
     pub use mitsuami_core::services::{
         Alert, AlertStyle, FileFilter, Menu, MenuBar, MenuItem, OpenFile, SaveFile, ServiceError, Shortcut, alert,
@@ -62,9 +76,9 @@ pub mod prelude {
         PlatformMetrics, PointerEvent, PointerKind, Rect, Render, Renderer, Shape,
     };
     pub use mitsuami_core::{
-        Align, ButtonVariant, Children, Element, ElementBuilder, FlexDirection, For, GridPlacement, Justify, Length,
-        LengthExt, NodeId, Point, Role, Show, Size, Spacing, TextDirection, TextStyle, Track, Ui, View, WindowSize,
-        repeat,
+        Align, ButtonVariant, Callback, Children, Element, ElementBuilder, FlexDirection, For, GridPlacement, Justify,
+        Length, LengthExt, NodeId, Point, Role, Show, Size, Slot, Spacing, TextDirection, TextStyle, Track, Ui, View,
+        WindowSize, repeat,
     };
     pub use mitsuami_reactive::{
         Computed, IntoValue, Owner, Signal, Value, batch, computed, effect, inject, on_cleanup, provide, signal,

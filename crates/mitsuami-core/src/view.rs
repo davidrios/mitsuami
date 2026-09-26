@@ -1,5 +1,7 @@
 //! Views: descriptions of UI that build nodes when mounted.
 
+use std::rc::Rc;
+
 use crate::ui::Ui;
 use crate::widget::{NodeId, Prop, WidgetKind};
 
@@ -90,3 +92,59 @@ tuple_children!(A, B, C, D, E, F, G, H, I);
 tuple_children!(A, B, C, D, E, F, G, H, I, J);
 tuple_children!(A, B, C, D, E, F, G, H, I, J, K);
 tuple_children!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+/// The children a component receives: what goes between its tags. Pass it
+/// on as children (`Column::new().children(children)`); it builds once.
+#[derive(Default)]
+pub struct Slot(Vec<AnyView>);
+
+impl Slot {
+    pub fn new(children: impl Children) -> Slot {
+        let mut views = Vec::new();
+        children.into_views(&mut views);
+        Slot(views)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Children for Slot {
+    fn into_views(self, out: &mut Vec<AnyView>) {
+        out.extend(self.0);
+    }
+}
+
+/// A component's event, Vue's `emit`: `on_change: Callback<f32>` in a
+/// `#[component]` is set with `@change=…` and fired with `on_change.call(v)`.
+/// The default does nothing.
+pub struct Callback<T: 'static>(Rc<dyn Fn(T)>);
+
+impl<T: 'static> Callback<T> {
+    pub fn new(handler: impl Fn(T) + 'static) -> Callback<T> {
+        Callback(Rc::new(handler))
+    }
+
+    pub fn call(&self, value: T) {
+        (self.0)(value)
+    }
+}
+
+impl<T: 'static> Clone for Callback<T> {
+    fn clone(&self) -> Self {
+        Callback(self.0.clone())
+    }
+}
+
+impl<T: 'static> Default for Callback<T> {
+    fn default() -> Self {
+        Callback::new(|_| {})
+    }
+}
+
+impl<T: 'static, F: Fn(T) + 'static> From<F> for Callback<T> {
+    fn from(handler: F) -> Callback<T> {
+        Callback::new(handler)
+    }
+}

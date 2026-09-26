@@ -64,7 +64,7 @@
 | `mitsuami-reactive` | Signals, computed values, effects, watchers, scopes/ownership, batching. Single-threaded, no UI knowledge. |
 | `mitsuami-core` | Node tree, components, widget kinds and props, styles and units, layout (Taffy), a11y model, focus, events, scheduler, backend trait. |
 | `mitsuami-widgets` | Built-in widget definitions: typed props, events and a11y defaults. Platform-free. |
-| `mitsuami-macros` | `#[component]`, `view!`, `platform!`. Pure sugar over the builder API. |
+| `mitsuami-macros` | `#[component]` and `view!`. Pure sugar over the builder API. (`platform!` is a `macro_rules!` in `mitsuami`.) |
 | `mitsuami-appkit` / `mitsuami-winui` / `mitsuami-gtk` | Backend implementations and their `NativeRender` traits for custom widgets. |
 | `mitsuami-headless` | In-memory backend with deterministic fake measurement and wireframe rendering. The default backend for integration tests. |
 | `mitsuami-test` | Public testing toolkit (§12): test runner, a11y-based queries, actions, assertions, fake clock and services, snapshots, stories, visual capture and diff. |
@@ -401,12 +401,12 @@ Every per-platform screen (§6.1) consumes the same stores and composables. That
 | `ref(x)` / `reactive` | `signal(x)` (`ref` is a Rust keyword). `Signal<T>` is `Copy` (arena-backed) |
 | `computed` | `computed(move || …)` |
 | `watch` / `watchEffect` | `watch(source, cb)` / `effect(move || …)` |
-| props | typed struct fields via `#[component] fn Foo(label: String, #[prop(default)] n: i32)` |
-| `emit('x')` | typed callback props: `on_change: Callback<f32>` |
-| `v-model` | `bind:value=signal` (two-way) |
-| `v-if` / `v-show` | `<Show when=…>` / `visible=…` |
-| `v-for` + `:key` | `<For each=… key=…>` |
-| slots / named slots | `children` / `#[slot] header: Slot` |
+| props | typed parameters: `#[component] fn Foo(label: String, #[prop(default)] n: i32)`; `Value<T>` for reactive ones |
+| `emit('x')` | typed callback props: `on_change: Callback<f32>`, set with `@change=…`, fired with `on_change.call(v)` |
+| `v-model` | `bind=signal` (two-way) |
+| `v-if` / `v-show` | `<Show when=… fallback=…>` / `hidden=…` |
+| `v-for` + `:key` | `<For each=… key=… let:item>` |
+| slots / named slots | `children: Slot` / named slots later |
 | `provide` / `inject` | `provide(ctx)` / `inject::<T>()` |
 | `onMounted` / `onUnmounted` | `on_mounted` / `on_cleanup` |
 | template refs | `let r = node_ref(); <TextInput node_ref=r/>`, then `r.focus()` |
@@ -418,25 +418,34 @@ fn Counter(initial: i32) -> impl View {
     let doubled = computed(move || count.get() * 2);
 
     view! {
-        <Column gap=Spacing::Md padding=2.em() align=Center>
-            <Text style=TextStyle::Title>{move || format!("Count: {}", count.get())}</Text>
-            <Button variant=Primary @click=move |_| count.update(|c| *c += 1)>"Increment"</Button>
-            <Show when=move || doubled.get() > 10>
-                <Text color=Color::SecondaryLabel>"That's a big number"</Text>
+        <Column gap=Spacing::Md padding=2.em() align=Align::Center>
+            <Text text_style=TextStyle::Title>{move || format!("Count: {}", count.get())}</Text>
+            <Button variant=ButtonVariant::Primary @click=move || count.update(|c| *c += 1)>"Increment"</Button>
+            <Show when={move || doubled.get() > 10}>
+                <Text>"That's a big number"</Text>
             </Show>
         </Column>
     }
 }
 ```
 
-The builder API is the real API. `view!` expands to it:
+The builder API is the real API. `view!` expands to it, one tag at a time: `<Tag a=x @e=h flag>children</Tag>` is `Tag::__tag().a(x).on_e(h).flag().__children(move || children)`. So the counter is:
 
 ```rust
-Column::new().gap(Spacing::Md).padding(2.em()).children((
-    Text::new(move || format!("Count: {}", count.get())).text_style(TextStyle::Title),
-    Button::new("Increment").variant(Primary).on_click(move || count.update(|c| *c += 1)),
+Column::__tag().gap(Spacing::Md).padding(2.em()).align(Align::Center).__children(move || (
+    Text::__tag().text_style(TextStyle::Title).__children(move || move || format!("Count: {}", count.get())),
+    Button::__tag().variant(ButtonVariant::Primary).on_click(move || count.update(|c| *c += 1)).__children(move || "Increment"),
+    Show::__tag().when(move || doubled.get() > 10).__children(move || Text::__tag().__children(move || "That's a big number")),
 ))
 ```
+
+which builds the same tree as `Column::new().gap(…).children((Text::new(…).text_style(…), Button::new("Increment")…, Show::new(…, …)))`.
+
+- **Attributes are builder methods,** checked by the compiler like any call. Values are literals, paths, calls, method chains and closures; anything else goes in braces. A `>` ends the tag, so comparisons need braces: `when={a > b}`. Enum values are written with their type (`Align::Center`): a macro can't infer types.
+- **Children** are passed in a closure, which is how `Show` rebuilds a branch and `For` renders a row (`let:item` names the row's parameter). Containers call it once. One child is passed as is, which gives `Text` its text and `Button` its label; several become a tuple.
+- **Required attributes are types.** `<Show>` is `ShowWithoutWhen` until `when` is set, and only a `Show` has children. `<For>` wants `each`, then `key`.
+- **`#[component]`** turns the function into a builder struct with one method per parameter, usable without `view!` (`Counter::new().initial(3)`). Each required prop is a type parameter, `()` until set, and the builder is a `View` only once all are set, so a missing prop is a compile error. `#[prop(default)]`, `#[prop(default = expr)]`, `Option<T>`, `Callback<T>` and `children: Slot` are optional; `#[prop(into)]` accepts `impl Into<T>`, and `Value<T>` accepts a literal, a signal or a closure.
+- **A component runs once, when it's built, in a scope of its own.** What it `provide`s reaches its children but not its siblings, and its scope is disposed with it.
 
 ---
 

@@ -124,3 +124,86 @@ impl<T: Clone + 'static, K: Eq + Hash + 'static> View for For<T, K> {
         fragment
     }
 }
+
+// `view!` tags. `<Show when=…>` and `<For each=… key=… let:item>` need
+// their required attributes before their children; each step is a type of
+// its own, so a missing one is a compile error.
+
+impl Show {
+    #[doc(hidden)]
+    pub fn __tag() -> ShowWithoutWhen {
+        ShowWithoutWhen { fallback: None }
+    }
+}
+
+#[doc(hidden)]
+pub struct ShowWithoutWhen {
+    fallback: Option<Branch>,
+}
+
+impl ShowWithoutWhen {
+    pub fn when(self, when: impl IntoValue<bool>) -> ShowWhen {
+        ShowWhen { when: when.into_value(), fallback: self.fallback }
+    }
+
+    pub fn fallback<V: View>(mut self, fallback: impl Fn() -> V + 'static) -> ShowWithoutWhen {
+        self.fallback = Some(Rc::new(move || AnyView::new(fallback())));
+        self
+    }
+}
+
+#[doc(hidden)]
+pub struct ShowWhen {
+    when: Value<bool>,
+    fallback: Option<Branch>,
+}
+
+impl ShowWhen {
+    pub fn fallback<V: View>(mut self, fallback: impl Fn() -> V + 'static) -> ShowWhen {
+        self.fallback = Some(Rc::new(move || AnyView::new(fallback())));
+        self
+    }
+
+    pub fn __children<V: View>(self, then: impl Fn() -> V + 'static) -> Show {
+        Show { when: self.when, then: Rc::new(move || AnyView::new(then())), fallback: self.fallback }
+    }
+}
+
+impl For<(), ()> {
+    #[doc(hidden)]
+    pub fn __tag() -> ForWithoutEach {
+        ForWithoutEach
+    }
+}
+
+#[doc(hidden)]
+pub struct ForWithoutEach;
+
+impl ForWithoutEach {
+    pub fn each<T: Clone + 'static>(self, each: impl IntoValue<Vec<T>>) -> ForWithoutKey<T> {
+        ForWithoutKey { each: each.into_value() }
+    }
+}
+
+#[doc(hidden)]
+pub struct ForWithoutKey<T: 'static> {
+    each: Value<Vec<T>>,
+}
+
+impl<T: Clone + 'static> ForWithoutKey<T> {
+    pub fn key<K: Eq + Hash + 'static>(self, key: impl Fn(&T) -> K + 'static) -> ForKeyed<T, K> {
+        ForKeyed { each: self.each, key: Rc::new(key) }
+    }
+}
+
+#[doc(hidden)]
+pub struct ForKeyed<T: 'static, K: 'static> {
+    each: Value<Vec<T>>,
+    key: KeyFn<T, K>,
+}
+
+impl<T: Clone + 'static, K: Eq + Hash + 'static> ForKeyed<T, K> {
+    pub fn __children<V: View>(self, render: impl Fn(T) -> V + 'static) -> For<T, K> {
+        For { each: self.each, key: self.key, render: Rc::new(move |item| AnyView::new(render(item))) }
+    }
+}

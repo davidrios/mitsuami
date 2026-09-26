@@ -383,3 +383,84 @@ impl Switch {
         Switch(element)
     }
 }
+
+// ----------------------------------------------------------- view! tags
+//
+// `view!` builds `<Tag …>children</Tag>` as
+// `Tag::__tag().….__children(move || children)`: containers take their
+// children, text and buttons their text.
+
+impl Container {
+    #[doc(hidden)]
+    pub fn __tag() -> Container {
+        Container::new()
+    }
+
+    #[doc(hidden)]
+    pub fn __children<C: Children>(self, children: impl FnOnce() -> C) -> Container {
+        self.children(children())
+    }
+}
+
+impl Column {
+    #[doc(hidden)]
+    pub fn __tag() -> Container {
+        Column::new()
+    }
+}
+
+impl Row {
+    #[doc(hidden)]
+    pub fn __tag() -> Container {
+        Row::new()
+    }
+}
+
+impl Grid {
+    #[doc(hidden)]
+    pub fn __tag() -> Container {
+        Grid::new()
+    }
+}
+
+impl ScrollView {
+    #[doc(hidden)]
+    pub fn __tag() -> ScrollView {
+        ScrollView::new()
+    }
+
+    #[doc(hidden)]
+    pub fn __children<C: Children>(self, children: impl FnOnce() -> C) -> ScrollView {
+        self.children(children())
+    }
+}
+
+/// Widgets whose one child is their text: `<Text>"Hello"</Text>`.
+macro_rules! text_tag {
+    ($t:ident, $prop:ident) => {
+        impl $t {
+            #[doc(hidden)]
+            pub fn __tag() -> $t {
+                $t(Element::new(WidgetKind::$t))
+            }
+
+            #[doc(hidden)]
+            pub fn __children<S: IntoValue<String>>(mut self, text: impl FnOnce() -> S) -> $t {
+                self.0.prop(text().into_value(), Prop::$prop);
+                self
+            }
+        }
+    };
+}
+
+text_tag!(Text, Text);
+text_tag!(Button, Label);
+text_tag!(Checkbox, Label);
+text_tag!(Switch, Label);
+
+impl TextInput {
+    #[doc(hidden)]
+    pub fn __tag() -> TextInput {
+        TextInput::new()
+    }
+}

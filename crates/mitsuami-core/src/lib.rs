@@ -34,7 +34,7 @@ pub use geometry::{Point, Rect, Size, WindowSize};
 pub use style::{Align, Display, FlexDirection, GridPlacement, Justify, Style, TextDirection, Track, repeat};
 pub use ui::{NodeInfo, Ui, WeakUi};
 pub use units::{Length, LengthExt, Spacing};
-pub use view::{AnyView, Children, View};
+pub use view::{AnyView, Callback, Children, Slot, View};
 pub use widget::{ButtonVariant, NodeId, Prop, ScrollAxes, TextStyle, WidgetKind};
 
 pub use mitsuami_reactive as reactive;

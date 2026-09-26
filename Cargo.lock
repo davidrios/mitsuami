@@ -515,6 +515,7 @@ dependencies = [
  "mitsuami-appkit",
  "mitsuami-core",
  "mitsuami-gtk",
+ "mitsuami-macros",
  "mitsuami-reactive",
  "mitsuami-test",
  "mitsuami-widgets",
@@ -557,6 +558,15 @@ name = "mitsuami-headless"
 version = "0.0.1"
 dependencies = [
  "mitsuami-core",
+]
+
+[[package]]
+name = "mitsuami-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
