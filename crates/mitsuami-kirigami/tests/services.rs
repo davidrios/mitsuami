@@ -55,8 +55,7 @@ mod checks {
     }
 
     pub fn menus_are_installed_and_activate(f: &Fixture) {
-        let window = f.ui.create_window("menu host", Size::new(400.0, 300.0));
-        f.ui.tick();
+        // The menu first, as apps do: windows get their drawer with them.
         let chosen = Rc::new(Cell::new(0));
         let (c, unavailable) = (chosen.clone(), chosen.clone());
         f.ui.set_menu(
@@ -68,6 +67,7 @@ mod checks {
                 )
                 .menu(Menu::new("View").item(MenuItem::new("Zoom", || {}))),
         );
+        let window = f.ui.create_window("menu host", Size::new(400.0, 300.0));
         f.ui.tick();
         let qml_window = f.handle.qml_window(window).unwrap();
         let drawer = qml_window.object("globalDrawer").expect("a global drawer");

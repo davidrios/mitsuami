@@ -29,17 +29,33 @@ pub(crate) struct MenuParts {
 }
 
 impl MenuParts {
-    /// Puts the menu in a window: a global drawer of its own, whose actions
-    /// run the items. A window without app menus gets none.
+    /// The global drawer's QML, for windows created while this menu is
+    /// installed: they get it inline. A window without app menus gets none.
+    pub(crate) fn drawer_qml(&self) -> Option<&str> {
+        self.has_app_menus.then_some(self.qml.as_str())
+    }
+
+    /// Puts the menu in an existing window: a global drawer of its own.
+    /// Kirigami's hamburger button warns about a binding loop when a drawer
+    /// or its actions arrive after the window is complete, so windows get
+    /// their drawer inline when they're created (see [`MenuParts::drawer_qml`]);
+    /// this is only for a menu whose structure changes later.
     pub(crate) fn install(&self, root: &WindowRoot) {
         if let Some(old) = root.drawer.take() {
             root.window.set_object("globalDrawer", None);
-            old.delete_later();
+            old.destroy();
         }
-        if !self.has_app_menus {
-            return;
-        }
-        let drawer = QmlObject::load(&self.qml);
+        let Some(qml) = self.drawer_qml() else { return };
+        let Some(overlay) = root.window.object("overlay") else { return };
+        let drawer = QmlObject::load_in(qml, overlay);
+        root.window.set_object("globalDrawer", Some(drawer));
+        root.drawer.set(Some(drawer));
+        self.connect(root);
+    }
+
+    /// Makes the window's drawer's actions run the items.
+    pub(crate) fn connect(&self, root: &WindowRoot) {
+        let Some(drawer) = root.drawer.get() else { return };
         for id in &self.items {
             if let Some(action) = drawer.child(&item_name(*id)) {
                 let (activate, id) = (self.activate.clone(), *id);
@@ -54,8 +70,6 @@ impl MenuParts {
                 }
             });
         }
-        root.window.set_object("globalDrawer", Some(drawer));
-        root.drawer.set(Some(drawer));
     }
 }
 
@@ -102,8 +116,10 @@ fn menu_qml(menu: &MenuBarData) -> (String, Vec<u32>) {
         menus.push(format!("Kirigami.Action {{ text: {}\n{}\n}}", js_string(&app_menu.title), entries.join("\n")));
     }
     menus.push(
+        // Plasma's binding; `StandardKey.Quit` maps to several, which Qt's
+        // shortcuts warn about.
         "Kirigami.Action { objectName: \"mitsuamiQuit\"; text: \"Quit\"; icon.name: \"application-exit\"; \
-         shortcut: StandardKey.Quit }"
+         shortcut: \"Ctrl+Q\" }"
             .into(),
     );
     (format!("Kirigami.GlobalDrawer {{ isMenu: true\nactions: [\n{}\n] }}", menus.join(",\n")), items)
@@ -217,7 +233,10 @@ impl Services for KirigamiServices {
              customFooterActions: [\n{}\n]\n}}",
             actions.join(",\n")
         );
-        let dialog = QmlObject::load(&qml);
+        let Some(overlay) = root.window.object("overlay") else {
+            return reply(buttons.len() - 1);
+        };
+        let dialog = QmlObject::load_in(&qml, overlay);
         dialog.set_str("title", &alert.title);
         dialog.set_str("subtitle", alert.message.as_deref().unwrap_or_default());
         let answer = answer_once(dialog, &self.backend, reply);
@@ -234,9 +253,20 @@ impl Services for KirigamiServices {
         // convention is the least committal one (Cancel).
         let cancel = buttons.len() - 1;
         dialog.connect("rejected()", move || answer(cancel));
-        dialog.set_object("parent", root.window.object("overlay"));
         self.backend.remember_dialog(dialog);
-        dialog.invoke("open");
+        // Opened in a window that hasn't been laid out and drawn yet (an
+        // alert as the app starts), Kirigami's dialog loops over its
+        // position: it waits for the window's first frame.
+        if root.has_rendered() {
+            dialog.invoke("open");
+        } else {
+            let pending = Cell::new(true);
+            root.window.connect("frameSwapped()", move || {
+                if pending.replace(false) {
+                    dialog.invoke("open");
+                }
+            });
+        }
     }
 
     fn open_file(&mut self, parent: Option<NodeId>, request: &OpenFile, reply: Reply<Option<Vec<PathBuf>>>) {

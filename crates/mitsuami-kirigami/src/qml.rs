@@ -47,24 +47,29 @@ fn a11y(default_name: &str) -> String {
     )
 }
 
-pub(crate) fn window() -> String {
+/// `drawer` is the app menu's global drawer, when there is one: it has to
+/// be there from the start (see `MenuParts::install`).
+pub(crate) fn window(drawer: Option<&str>) -> String {
     // One page, with no padding: its content item is the content host.
     // The page's title goes in Kirigami's toolbar above it.
-    r#"
-Kirigami.ApplicationWindow {
+    let drawer = drawer.map(|qml| format!("globalDrawer: {qml}")).unwrap_or_default();
+    format!(
+        r#"
+Kirigami.ApplicationWindow {{
     width: 800
     height: 600
-    pageStack.initialPage: Kirigami.Page {
+    {drawer}
+    pageStack.initialPage: Kirigami.Page {{
         objectName: "mitsuamiPage"
         padding: 0
-        Item {
+        Item {{
             objectName: "mitsuamiHost"
             anchors.fill: parent
-        }
-    }
-}
+        }}
+    }}
+}}
 "#
-    .into()
+    )
 }
 
 pub(crate) fn container() -> String {

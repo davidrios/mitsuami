@@ -74,6 +74,7 @@ double mq_device_pixel_ratio(void);
 
 // Objects and the item tree.
 QObject* mq_load(const char* qml, char** error);
+QObject* mq_load_in(const char* qml, QObject* parent, char** error);
 void mq_destroy(QObject* object);
 void mq_delete_later(QObject* object);
 QObject* mq_find_child(QObject* object, const char* name);

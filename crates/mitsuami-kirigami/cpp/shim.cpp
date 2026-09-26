@@ -271,8 +271,10 @@ double mq_device_pixel_ratio(void) { return qApp->devicePixelRatio(); }
 
 // ---------------------------------------------------------------- objects
 
-// One component per distinct QML text, compiled once.
-QObject* mq_load(const char* qml, char** error) {
+// One component per distinct QML text, compiled once. With a parent item,
+// it's the object's `parent` from the start: popups (drawers, dialogs)
+// evaluate bindings on their parent as they're created.
+QObject* mq_load_in(const char* qml, QObject* parent, char** error) {
     QString text = QString::fromUtf8(qml);
     QQmlComponent* component = g_components.value(text);
     if (!component) {
@@ -280,7 +282,10 @@ QObject* mq_load(const char* qml, char** error) {
         component->setData(text.toUtf8(), QUrl());
         g_components.insert(text, component);
     }
-    QObject* object = component->create();
+    auto* parentItem = qobject_cast<QQuickItem*>(parent);
+    QObject* object = parentItem
+        ? component->createWithInitialProperties({{QStringLiteral("parent"), QVariant::fromValue(parentItem)}})
+        : component->create();
     if (!object) {
         if (error) *error = dup(component->errorString());
         return nullptr;
@@ -288,6 +293,8 @@ QObject* mq_load(const char* qml, char** error) {
     QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
     return object;
 }
+
+QObject* mq_load(const char* qml, char** error) { return mq_load_in(qml, nullptr, error); }
 
 void mq_destroy(QObject* object) { delete object; }
 void mq_delete_later(QObject* object) { object->deleteLater(); }

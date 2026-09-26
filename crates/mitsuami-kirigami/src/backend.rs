@@ -82,6 +82,11 @@ impl WindowRoot {
         self.window.set_real("height", (size.height as f64 + header).round());
     }
 
+    /// Whether the window has drawn a frame: it's shown and laid out.
+    pub(crate) fn has_rendered(&self) -> bool {
+        self.header.get().is_some()
+    }
+
     /// The first frame is laid out for real: the toolbar's height is known.
     fn rendered(&self) {
         if self.header.get().is_some() {
@@ -241,6 +246,9 @@ impl Drop for State {
         }
         for node in self.nodes.values() {
             if let Widget::Window { root } = &node.widget {
+                if let Some(drawer) = root.drawer.take() {
+                    drawer.delete_later();
+                }
                 root.window.delete_later();
             }
         }
@@ -582,7 +590,7 @@ impl State {
 
     fn create_window(&mut self, id: NodeId) -> Widget {
         let events = self.events.clone();
-        let window = QmlObject::load(&qml::window());
+        let window = QmlObject::load(&qml::window(self.menu.as_ref().and_then(|m| m.drawer_qml())));
         let host = window.child("mitsuamiHost").expect("windows have a content host");
         let root = Rc::new(WindowRoot {
             id,
@@ -630,7 +638,9 @@ impl State {
         window.connect("devicePixelRatioChanged()", move || e.emit(id, UiEvent::MetricsChanged));
         self.pending_show.push(id);
         if let Some(menu) = &self.menu {
-            menu.install(&root);
+            // Its drawer came with the window, if the app has menus.
+            root.drawer.set(window.object("globalDrawer"));
+            menu.connect(&root);
         }
         Widget::Window { root }
     }
@@ -765,7 +775,14 @@ impl State {
                 let Some(node) = self.nodes.remove(id) else { violation(command, "node does not exist") };
                 self.pending_show.retain(|w| w != id);
                 match &node.widget {
-                    Widget::Window { root } => root.window.destroy(),
+                    Widget::Window { root } => {
+                        // The menu drawer isn't the window's child: it
+                        // would outlive it, bound to a parent that's gone.
+                        if let Some(drawer) = root.drawer.take() {
+                            drawer.destroy();
+                        }
+                        root.window.destroy()
+                    }
                     widget => widget.item().destroy(),
                 }
             }

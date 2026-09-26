@@ -31,7 +31,7 @@ unsafe extern "C" {
     fn mq_set_color_scheme(path: *const c_char);
     fn mq_device_pixel_ratio() -> f64;
 
-    fn mq_load(qml: *const c_char, error: *mut *mut c_char) -> Raw;
+    fn mq_load_in(qml: *const c_char, parent: Raw, error: *mut *mut c_char) -> Raw;
     fn mq_destroy(object: Raw);
     fn mq_delete_later(object: Raw);
     fn mq_find_child(object: Raw, name: *const c_char) -> Raw;
@@ -270,9 +270,21 @@ impl QmlObject {
     ///
     /// If the QML doesn't compile or create: that's a bug in the snippet.
     pub fn load(qml: &str) -> QmlObject {
+        QmlObject::create(qml, None)
+    }
+
+    /// Like [`QmlObject::load`], with `parent` (an item) as the object's
+    /// `parent` from the start. Popups (drawers, dialogs) need it: they
+    /// evaluate bindings on their parent as they're created.
+    pub fn load_in(qml: &str, parent: QmlObject) -> QmlObject {
+        QmlObject::create(qml, Some(parent))
+    }
+
+    fn create(qml: &str, parent: Option<QmlObject>) -> QmlObject {
         let text = format!("{IMPORTS}{qml}");
+        let parent = parent.map_or(std::ptr::null_mut(), QmlObject::raw);
         let mut error = std::ptr::null_mut();
-        let object = unsafe { mq_load(c(&text).as_ptr(), &mut error) };
+        let object = unsafe { mq_load_in(c(&text).as_ptr(), parent, &mut error) };
         match QmlObject::from_raw(object) {
             Some(object) => object,
             None => {
