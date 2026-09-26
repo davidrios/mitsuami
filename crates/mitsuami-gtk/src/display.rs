@@ -11,7 +11,6 @@
 
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -20,7 +19,9 @@ const DAEMON: &str = "gtk4-broadwayd";
 /// Starts the display and points GDK at it. Call before GTK initializes,
 /// while the process is still single-threaded.
 pub(crate) fn start_private_display() {
-    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    // Where the daemon puts its socket: GLib's runtime directory, which
+    // falls back to the cache directory without XDG_RUNTIME_DIR.
+    let runtime_dir = gtk::glib::user_runtime_dir();
     // The daemon leaves its socket behind when it's killed. Clear dead ones
     // (nothing accepts connections on them) from earlier runs.
     for display in 100..920 {

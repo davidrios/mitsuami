@@ -52,6 +52,7 @@ pub(crate) fn image(scale_factor: f32) -> String {
     if scale_factor == 1.0 { os.clone() } else { format!("{os}@{scale_factor}x") }
 }
 
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = std::process::Command::new(program).args(args).output().ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -88,7 +89,6 @@ fn os_image() -> String {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn os_image() -> String {
-    let _ = command_output;
     std::env::consts::OS.to_owned()
 }
 

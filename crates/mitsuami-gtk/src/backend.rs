@@ -310,6 +310,16 @@ impl GtkHandle {
     pub fn resize_window(&self, window: NodeId, size: Size) {
         let Some((gtk_window, host, header_height)) = self.window_parts(window) else { return };
         gtk_window.set_default_size(size.width as i32, size.height as i32 + header_height);
+        // Some backends (Broadway before GTK 4.16) only size a toplevel when
+        // its surface is presented, so a mapped window ignores a new default
+        // size until then. `GtkWindow::present` would only focus it.
+        if gtk_window.is_mapped()
+            && let Some(toplevel) = gtk_window.surface().and_downcast::<gdk::Toplevel>()
+        {
+            let layout = gdk::ToplevelLayout::new();
+            layout.set_resizable(gtk_window.is_resizable());
+            toplevel.present(&layout);
+        }
         let target = (size.width as i32, size.height as i32);
         pump_until(Duration::from_secs(2), || (WidgetExt::width(&host), WidgetExt::height(&host)) == target);
     }
