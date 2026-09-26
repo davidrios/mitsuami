@@ -1503,6 +1503,29 @@ unsafe impl Sync for FrameworkElementAutomationPeer {}
 pub const GWL_EXSTYLE: i32 = -20;
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Geometry(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(Geometry, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(Geometry, DependencyObject);
+impl windows_core::RuntimeType for Geometry {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IGeometry>();
+}
+unsafe impl windows_core::Interface for Geometry {
+    type Vtable = <IGeometry as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IGeometry as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for Geometry {
+    type Target = IGeometry;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for Geometry {
+    const NAME: &'static str = "Microsoft.UI.Xaml.Media.Geometry";
+}
+unsafe impl Send for Geometry {}
+unsafe impl Sync for Geometry {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Grid(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(Grid, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(Grid, Panel, FrameworkElement, UIElement, DependencyObject);
@@ -3137,6 +3160,14 @@ pub struct IFrameworkElementAutomationPeerStatics_Vtbl {
         *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(IGeometry, IGeometry_Vtbl, 0xdc102dcc_3be2_5414_8599_94b6e76ef39b);
+impl windows_core::RuntimeType for IGeometry {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IGeometry_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IGrid, IGrid_Vtbl, 0xc4496219_9014_58a1_b4ad_c5044913a5bb);
 impl windows_core::RuntimeType for IGrid {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -4157,6 +4188,25 @@ pub struct IRatingControlStatics_Vtbl {
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
+    IRectangleGeometry,
+    IRectangleGeometry_Vtbl,
+    0xb6143890_a5f5_54e0_ab42_d88bab451f04
+);
+impl windows_core::RuntimeType for IRectangleGeometry {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IRectangleGeometry {
+    pub fn SetRect(&self, value: Rect) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetRect)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+}
+#[repr(C)]
+pub struct IRectangleGeometry_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    Rect: usize,
+    pub SetRect: unsafe extern "system" fn(*mut core::ffi::c_void, Rect) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
     IRenderTargetBitmap,
     IRenderTargetBitmap_Vtbl,
     0xcf10407d_fa8b_57a3_9574_710529ae0b04
@@ -5109,6 +5159,15 @@ impl IUIElement {
                 .map(|| result__)
         }
     }
+    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<RectangleGeometry>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetClip)(windows_core::Interface::as_raw(self), value.param().abi())
+                .ok()
+        }
+    }
     pub fn KeyboardAccelerators(&self) -> windows_core::Result<windows_collections::IVector<KeyboardAccelerator>> {
         unsafe {
             let mut result__ = core::mem::zeroed();
@@ -5338,7 +5397,7 @@ pub struct IUIElement_Vtbl {
     Opacity: usize,
     SetOpacity: usize,
     Clip: usize,
-    SetClip: usize,
+    pub SetClip: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
     RenderTransform: usize,
     SetRenderTransform: usize,
     Projection: usize,
@@ -7055,6 +7114,57 @@ impl windows_core::RuntimeName for RatingControl {
 }
 unsafe impl Send for RatingControl {}
 unsafe impl Sync for RatingControl {}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+impl windows_core::imp::TypeKind for Rect {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for Rect {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"struct(Windows.Foundation.Rect;f4;f4;f4;f4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RectangleGeometry(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(RectangleGeometry, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(RectangleGeometry, Geometry, DependencyObject);
+impl RectangleGeometry {
+    pub fn new() -> windows_core::Result<Self> {
+        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+    }
+    fn IActivationFactory<R, F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<RectangleGeometry, windows_core::imp::IGenericFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for RectangleGeometry {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IRectangleGeometry>();
+}
+unsafe impl windows_core::Interface for RectangleGeometry {
+    type Vtable = <IRectangleGeometry as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IRectangleGeometry as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for RectangleGeometry {
+    type Target = IRectangleGeometry;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for RectangleGeometry {
+    const NAME: &'static str = "Microsoft.UI.Xaml.Media.RectangleGeometry";
+}
+unsafe impl Send for RectangleGeometry {}
+unsafe impl Sync for RectangleGeometry {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderTargetBitmap(windows_core::IUnknown);

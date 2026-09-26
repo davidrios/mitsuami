@@ -82,6 +82,20 @@ fn report_size(emitter: &Events, window: NodeId, last: &Cell<Option<Size>>, size
     }
 }
 
+/// Clips the content host to its size. A `Canvas` doesn't clip its
+/// children, so content past the window's edge would still be rendered, in
+/// captures too.
+fn clip_to_size(host: &w::IUIElement, size: w::Size) -> windows_core::Result<()> {
+    let clip = w::RectangleGeometry::new()?;
+    clip.cast::<w::IRectangleGeometry>()?.SetRect(w::Rect {
+        x: 0.0,
+        y: 0.0,
+        width: size.width,
+        height: size.height,
+    })?;
+    host.SetClip(&clip)
+}
+
 /// Reports a focus move, once: moves we make are reported right away (XAML
 /// raises `GotFocus` asynchronously), and the later `GotFocus` finds them
 /// already reported.
@@ -761,11 +775,14 @@ impl State {
         let size = Rc::new(Cell::new(None::<Size>));
         revokers.push(host.cast::<w::IFrameworkElement>()?.SizeChanged({
             let (emitter, last) = (emitter.clone(), size.clone());
-            move |_, args| {
+            move |sender, args| {
                 let Some(new) = args.as_ref().and_then(|a| a.cast::<w::ISizeChangedEventArgs>().ok()?.NewSize().ok())
                 else {
                     return;
                 };
+                if let Some(host) = sender.as_ref().and_then(|s| s.cast::<w::IUIElement>().ok()) {
+                    _ = clip_to_size(&host, new);
+                }
                 report_size(&emitter, id, &last, Size::new(new.width, new.height));
             }
         })?);
