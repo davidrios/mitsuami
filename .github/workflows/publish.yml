@@ -1,0 +1,37 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # `cargo publish` builds every crate before uploading, and the GTK
+      # backend needs the system GTK 4 headers to build.
+      - name: Install GTK 4
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+
+      - name: Check the tag matches the workspace version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "mitsuami") | .version')
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match workspace version ${version}"
+            exit 1
+          fi
+
+      # Publishes every workspace crate in dependency order.
+      - name: Publish
+        run: cargo publish --workspace
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

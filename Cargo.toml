@@ -11,17 +11,17 @@ authors = ["David Rios <david.rios.gomes@gmail.com>"]
 repository = "https://github.com/davidrios/mitsuami"
 
 [workspace.dependencies]
-mitsuami = { path = "crates/mitsuami" }
-mitsuami-reactive = { path = "crates/mitsuami-reactive" }
-mitsuami-core = { path = "crates/mitsuami-core" }
-mitsuami-widgets = { path = "crates/mitsuami-widgets" }
-mitsuami-headless = { path = "crates/mitsuami-headless" }
-mitsuami-test = { path = "crates/mitsuami-test" }
-mitsuami-test-macros = { path = "crates/mitsuami-test-macros" }
-mitsuami-macros = { path = "crates/mitsuami-macros" }
-mitsuami-appkit = { path = "crates/mitsuami-appkit" }
-mitsuami-gtk = { path = "crates/mitsuami-gtk" }
-mitsuami-winui = { path = "crates/mitsuami-winui" }
+mitsuami = { path = "crates/mitsuami", version = "=0.0.1" }
+mitsuami-reactive = { path = "crates/mitsuami-reactive", version = "=0.0.1" }
+mitsuami-core = { path = "crates/mitsuami-core", version = "=0.0.1" }
+mitsuami-widgets = { path = "crates/mitsuami-widgets", version = "=0.0.1" }
+mitsuami-headless = { path = "crates/mitsuami-headless", version = "=0.0.1" }
+mitsuami-test = { path = "crates/mitsuami-test", version = "=0.0.1" }
+mitsuami-test-macros = { path = "crates/mitsuami-test-macros", version = "=0.0.1" }
+mitsuami-macros = { path = "crates/mitsuami-macros", version = "=0.0.1" }
+mitsuami-appkit = { path = "crates/mitsuami-appkit", version = "=0.0.1" }
+mitsuami-gtk = { path = "crates/mitsuami-gtk", version = "=0.0.1" }
+mitsuami-winui = { path = "crates/mitsuami-winui", version = "=0.0.1" }
 
 slotmap = "1.1"
 taffy = "0.14"
