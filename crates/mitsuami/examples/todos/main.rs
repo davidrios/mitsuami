@@ -13,6 +13,8 @@
 //!
 //! `showcase` is the same kind of tour written with the builder API.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod screen;
 mod store;
 

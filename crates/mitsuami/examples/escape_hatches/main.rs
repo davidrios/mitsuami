@@ -16,6 +16,8 @@
 //! Written with `view!` and `#[component]`; the store is a `Store`, the
 //! app's one instance.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod lock;
 mod pips_pager;
 mod rating;

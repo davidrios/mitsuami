@@ -1,5 +1,7 @@
 //! A counter and a small form: `cargo run -p mitsuami --example showcase`.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use mitsuami::prelude::*;
 
 fn counter(log_lines: Signal<Vec<u32>>) -> impl View {
