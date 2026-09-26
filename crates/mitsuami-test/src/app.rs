@@ -44,7 +44,12 @@ pub struct TestApp {
     clock: Rc<ManualClock>,
     services: FakeServicesHandle,
     driver: Driver,
+    /// Holds what the app provides (the `Ui`, stores, test fakes) and
+    /// outlives unmounting.
     owner: Owner,
+    /// What's mounted, a child of `owner`: `unmount` disposes it, and the
+    /// next mount starts a new one.
+    mounted: Cell<Option<Owner>>,
     window: Cell<Option<NodeId>>,
     window_size: WindowSize,
     pub(crate) context: TestContext,
@@ -74,7 +79,17 @@ impl TestApp {
             mitsuami_reactive::provide(ui.clone());
             mitsuami_core::provide_stores();
         });
-        TestApp { ui, clock, services, driver, owner, window: Cell::new(None), window_size, context }
+        TestApp {
+            ui,
+            clock,
+            services,
+            driver,
+            owner,
+            mounted: Cell::new(None),
+            window: Cell::new(None),
+            window_size,
+            context,
+        }
     }
 
     /// The scripted platform services: answer dialogs, inspect the
@@ -167,7 +182,9 @@ impl TestApp {
     /// story's size) and settles.
     pub fn mount<V: View>(&self, view: impl FnOnce() -> V) -> NodeId {
         let window = self.window();
-        let root = self.owner.with(|| view().build(&self.ui));
+        let mounted = self.mounted.get().unwrap_or_else(|| self.owner.child());
+        self.mounted.set(Some(mounted));
+        let root = mounted.with(|| view().build(&self.ui));
         self.ui.append_child(window, root);
         self.settle_now();
         root
@@ -297,7 +314,9 @@ impl TestApp {
 
     /// Disposes everything mounted and destroys the window.
     pub fn unmount(&self) {
-        self.owner.dispose();
+        if let Some(mounted) = self.mounted.take() {
+            mounted.dispose();
+        }
         if let Some(window) = self.window.take() {
             self.ui.destroy(window);
         }
