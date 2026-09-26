@@ -1,0 +1,15 @@
+[package]
+name = "cargo-mitsuami"
+description = "The mitsuami CLI: run, review and accept visual baselines"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+similar.workspace = true
+
+[lints]
+workspace = true

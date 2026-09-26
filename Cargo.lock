@@ -59,6 +59,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-mitsuami"
+version = "0.0.1"
+dependencies = [
+ "similar",
+]
+
+[[package]]
 name = "cc"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
