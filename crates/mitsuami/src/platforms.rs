@@ -5,6 +5,10 @@
 /// of them joined with `|`, and a final `_` for everything else. The first
 /// matching arm wins. Arms may have different types, since only one exists.
 ///
+/// On Linux, `gtk` and `kde` name the toolkit: `kde` matches when mitsuami
+/// is built with its `kde` feature (Qt Quick and Kirigami), `gtk` when it
+/// isn't. `linux` matches either, so put `kde` or `gtk` arms before it.
+///
 /// ```ignore
 /// fn preferences() -> impl View {
 ///     let model = use_preferences();
@@ -55,6 +59,13 @@ macro_rules! __platform {
     (@names $v:ident $seen:tt $out:tt [$($p:tt)*] linux $($rest:tt)*) => {
         $crate::__platform!(@names $v $seen $out [$($p)* target_os = "linux",] $($rest)*)
     };
+    // The toolkits: what they mean was settled when mitsuami was built.
+    (@names $v:ident $seen:tt $out:tt $p:tt gtk $($rest:tt)*) => {
+        $crate::__platform_gtk!($v $seen $out $p $($rest)*)
+    };
+    (@names $v:ident $seen:tt $out:tt $p:tt kde $($rest:tt)*) => {
+        $crate::__platform_kde!($v $seen $out $p $($rest)*)
+    };
     (@names $v:ident $seen:tt $out:tt $p:tt | $($rest:tt)*) => {
         $crate::__platform!(@names $v $seen $out $p $($rest)*)
     };
@@ -74,7 +85,46 @@ macro_rules! __platform {
         ::core::compile_error!(::core::concat!(
             "platform!: unknown platform `",
             ::core::stringify!($other),
-            "`; use macos, windows, linux, `|` between them, or `_`"
+            "`; use macos, windows, linux, gtk, kde, `|` between them, or `_`"
         ))
+    };
+}
+
+// `kde` is Linux with the `kde` feature; `gtk` is Linux without it. A
+// toolkit that isn't built in adds `any()`, which never matches.
+
+#[cfg(feature = "kde")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __platform_kde {
+    ($v:ident $seen:tt $out:tt [$($p:tt)*] $($rest:tt)*) => {
+        $crate::__platform!(@names $v $seen $out [$($p)* target_os = "linux",] $($rest)*)
+    };
+}
+
+#[cfg(not(feature = "kde"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __platform_kde {
+    ($v:ident $seen:tt $out:tt [$($p:tt)*] $($rest:tt)*) => {
+        $crate::__platform!(@names $v $seen $out [$($p)* any(),] $($rest)*)
+    };
+}
+
+#[cfg(all(feature = "gtk", not(feature = "kde")))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __platform_gtk {
+    ($v:ident $seen:tt $out:tt [$($p:tt)*] $($rest:tt)*) => {
+        $crate::__platform!(@names $v $seen $out [$($p)* target_os = "linux",] $($rest)*)
+    };
+}
+
+#[cfg(not(all(feature = "gtk", not(feature = "kde"))))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __platform_gtk {
+    ($v:ident $seen:tt $out:tt [$($p:tt)*] $($rest:tt)*) => {
+        $crate::__platform!(@names $v $seen $out [$($p)* any(),] $($rest)*)
     };
 }

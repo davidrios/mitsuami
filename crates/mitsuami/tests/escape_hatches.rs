@@ -68,6 +68,24 @@ fn platform_picks_the_arm_for_this_platform() {
     let _ = value;
 }
 
+#[mitsuami_test::test]
+fn platform_tells_the_linux_toolkits_apart() {
+    let linux = cfg!(target_os = "linux");
+    let toolkit = platform! { kde => "kde", gtk => "gtk", _ => "other" };
+    let expected = match (linux, cfg!(feature = "kde")) {
+        (true, true) => "kde",
+        (true, false) => "gtk",
+        (false, _) => "other",
+    };
+    assert_eq!(toolkit, expected);
+
+    // `linux` matches either toolkit; an earlier toolkit arm wins over it.
+    let either = platform! { linux => true, _ => false };
+    assert_eq!(either, linux);
+    let first = platform! { kde | gtk => 1, linux => 2, _ => 3 };
+    assert_eq!(first, if linux { 1 } else { 3 });
+}
+
 // ----------------------------------------------------------- custom widgets
 
 #[mitsuami_test::test]
@@ -297,6 +315,7 @@ async fn each_platform_has_its_own_widget_native(app: TestApp) {
     let expected: &[&str] = platform! {
         macos => &["Rating (native)"],
         // The rating is built ad hoc there: not labelled native.
+        kde => &["Lock (native)", "Page (native)"],
         linux => &["Lock (native)"],
         windows => &["Rating (native)", "Page (native)"],
         _ => &[],
@@ -401,7 +420,7 @@ mod native_views {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "kde")))]
 mod native_views {
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -466,6 +485,78 @@ mod native_views {
         }
         // Accessibility increments step the spin button; its signal comes
         // back as an event the view handles.
+        app.get_by_label("Stars").increment().await;
+        app.get_by_label("Stars").increment().await;
+        assert_eq!(stars.get_untracked(), 2);
+        app.get_by_label("Stars").decrement().await;
+        assert_eq!(stars.get_untracked(), 1);
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "kde"))]
+mod native_views {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use mitsuami::core::{Prop, WidgetKind};
+    use mitsuami::kirigami::{NativeView, QmlObject};
+    use mitsuami::prelude::*;
+    use mitsuami_test::prelude::*;
+
+    #[mitsuami_test::test]
+    async fn native_views_are_created_measured_and_updated(app: TestApp) {
+        let title = signal("First".to_string());
+        let button: Rc<Cell<Option<QmlObject>>> = Rc::default();
+        let created = button.clone();
+        app.mount(move || {
+            Row::new().child(
+                NativeView::qml(move |cx| {
+                    let button = cx.load("QQC2.Button { }");
+                    created.set(Some(button));
+                    button
+                })
+                .measure(|_, _| Size::new(120.0, 30.0))
+                .update(title, |button, title| button.set_str("text", title))
+                .a11y_label("Raw button"),
+            )
+        });
+        let node = app.get_by_label("Raw button");
+        assert_eq!(node.native_state().kind, WidgetKind::Native);
+        assert!(node.native_state().props.iter().any(|p| matches!(p, Prop::Native(_))));
+        if app.is_headless() {
+            // No native view to create: an empty box.
+            assert!(button.get().is_none());
+            return;
+        }
+        assert_eq!(node.frame().size, Size::new(120.0, 30.0));
+        let button = button.get().expect("created natively");
+        assert_eq!(button.str("text"), "First");
+        title.set("Second".into());
+        app.settle().await;
+        assert_eq!(button.str("text"), "Second");
+    }
+
+    #[mitsuami_test::test]
+    async fn native_views_report_their_events(app: TestApp) {
+        let stars = signal(0u8);
+        app.mount(move || {
+            NativeView::qml(|cx| {
+                let spin = cx.load("QQC2.SpinBox { from: 0; to: 5 }");
+                let emitter = cx.emitter();
+                // Not `valueModified`: Qt doesn't emit it for a screen
+                // reader's steps. The backend mutes its own updates.
+                spin.connect("valueChanged()", move || emitter.emit(spin.int("value") as u8));
+                spin
+            })
+            .update(stars, |spin, stars| spin.set_int("value", *stars as i32))
+            .on_event(move |value: &u8| stars.set(*value))
+            .a11y_label("Stars")
+        });
+        if app.is_headless() {
+            return;
+        }
+        // Accessibility increments step the spin box; its signal comes back
+        // as an event the view handles.
         app.get_by_label("Stars").increment().await;
         app.get_by_label("Stars").increment().await;
         assert_eq!(stars.get_untracked(), 2);

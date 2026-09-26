@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Runs the workspace tests and, if they fail, posts the failure report as an
-# annotation. Usage: cargo-test.sh <label>
+# Runs the workspace tests (or the packages and features given after the
+# label) and, if they fail, posts the failure report as an annotation.
+# Usage: cargo-test.sh <label> [cargo test selection…]
 set -uo pipefail
 
 log="$RUNNER_TEMP/cargo-test-$1.log"
-cargo test --workspace --no-fail-fast 2>&1 | tee "$log"
+selection=("${@:2}")
+[ ${#selection[@]} -gt 0 ] || selection=(--workspace)
+cargo test "${selection[@]}" --no-fail-fast 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 
 if [ "$status" -ne 0 ]; then

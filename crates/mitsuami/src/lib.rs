@@ -26,15 +26,16 @@
 //! ))
 //! ```
 //!
-//! The platform backend is chosen by target OS: AppKit on macOS, GTK 4 on
-//! Linux, and WinUI 3 on Windows.
+//! The platform backend is chosen by target OS: AppKit on macOS, WinUI 3 on
+//! Windows, and on Linux GTK 4, or Qt Quick and Kirigami (KDE Plasma) with
+//! the `kde` feature.
 //!
 //! Escape hatches, for when the shared widgets aren't enough:
 //! - [`platform!`] picks per-platform code (a whole screen, a detail) at
 //!   compile time, while stores and composables stay shared.
 //! - `NativeView` embeds any native view in the shared tree
-//!   (`appkit::NativeView` on macOS, `gtk::NativeView` on Linux,
-//!   `winui::NativeView` on Windows).
+//!   (`appkit::NativeView` on macOS, `gtk::NativeView` or
+//!   `kirigami::NativeView` on Linux, `winui::NativeView` on Windows).
 //! - Custom widgets: one [`CustomWidget`](core::CustomWidget) definition,
 //!   rendered natively per platform or drawn with the
 //!   [`Canvas`](core::Canvas) API.
@@ -55,8 +56,16 @@ pub use mitsuami_appkit as appkit;
 
 /// The GTK 4 backend: native renders, native views, and the `gtk4`
 /// bindings to write them with (`gtk::gtk`).
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "gtk", not(feature = "kde")))]
 pub use mitsuami_gtk as gtk;
+
+/// The Qt Quick and Kirigami backend (the `kde` feature): native renders,
+/// native views, and `QmlObject`, the handle to write them with.
+#[cfg(all(target_os = "linux", feature = "kde"))]
+pub use mitsuami_kirigami as kirigami;
+
+#[cfg(all(target_os = "linux", not(any(feature = "gtk", feature = "kde"))))]
+compile_error!("mitsuami: pick a Linux toolkit with the `gtk` (default) or `kde` feature");
 
 /// The WinUI 3 backend: native renders, native views, and the XAML
 /// bindings to write them with (`winui::bindings`, `winui::windows_core`).

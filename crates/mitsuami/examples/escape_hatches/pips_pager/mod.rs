@@ -1,9 +1,12 @@
 //! A pips pager, the WinUI widget: a row of dots, one per page, the current
-//! one larger. On Windows it's WinUI's own `PipsPager` (`windows.rs`).
-//! Neither AppKit nor GTK has one, so elsewhere it's drawn.
+//! one larger. On Windows it's WinUI's own `PipsPager` (`windows.rs`), and
+//! on KDE Qt's `PageIndicator` (`kde.rs`). Neither AppKit nor GTK has one,
+//! so elsewhere it's drawn.
 
 use mitsuami::prelude::*;
 
+#[cfg(all(target_os = "linux", feature = "kde"))]
+mod kde;
 #[cfg(windows)]
 mod windows;
 
@@ -74,6 +77,7 @@ impl Render for PipsPager {
     fn renderer() -> Renderer<Self> {
         platform! {
             windows => mitsuami::winui::native::<Self>().with_drawn(),
+            kde => mitsuami::kirigami::native::<Self>().with_drawn(),
             _ => Renderer::drawn(),
         }
     }

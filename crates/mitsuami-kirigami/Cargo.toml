@@ -1,0 +1,29 @@
+[package]
+name = "mitsuami-kirigami"
+description = "Qt Quick and Kirigami (KDE Plasma) backend for mitsuami"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+# Builds the backend. Without it the crate is empty, so the workspace builds
+# on Linux machines without Qt; `mitsuami`'s `kde` feature turns it on.
+qt = []
+
+[dependencies]
+mitsuami-core.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+pkg-config.workspace = true
+
+[[test]]
+name = "services"
+harness = false
+required-features = ["qt"]
+
+[lints]
+workspace = true

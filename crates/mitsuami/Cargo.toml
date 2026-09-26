@@ -8,6 +8,14 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["gtk"]
+# The Linux toolkit. With `kde`, Qt Quick and Kirigami (KDE Plasma) replace
+# GTK 4, even if `gtk` is on too. They make no difference on macOS and
+# Windows.
+gtk = ["dep:mitsuami-gtk"]
+kde = ["dep:mitsuami-kirigami", "mitsuami-kirigami/qt"]
+
 [dependencies]
 mitsuami-core.workspace = true
 mitsuami-reactive.workspace = true
@@ -18,7 +26,8 @@ mitsuami-macros.workspace = true
 mitsuami-appkit.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mitsuami-gtk.workspace = true
+mitsuami-gtk = { workspace = true, optional = true }
+mitsuami-kirigami = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 mitsuami-winui.workspace = true

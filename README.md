@@ -1,14 +1,16 @@
 # mitsuami
 
 Native, declarative, cross-platform UI for Rust: AppKit on macOS, WinUI 3 on
-Windows, GTK 4 on Linux, driven by one Vue-inspired layer with CSS-style
-flexbox/grid layout.
+Windows, GTK 4 on Linux, or Qt Quick with Kirigami for KDE Plasma, driven by
+one Vue-inspired layer with CSS-style flexbox/grid layout.
 
 Status: **M1 to M5 done**. The AppKit, GTK 4 and WinUI 3 backends run real
 apps on macOS, Linux and Windows, and the same tests pass headlessly and
-against the native widgets of all three. The escape hatches work on each:
-`platform!` for per-platform code, `NativeView` for any `NSView`, GTK widget
-or XAML element, and custom widgets that are native where the platform has
+against the native widgets of all three. On Linux, the `kde` feature swaps
+GTK 4 for Qt Quick and Kirigami, KDE Plasma's toolkit, which passes the same
+tests. The escape hatches work on each:
+`platform!` for per-platform code, `NativeView` for any `NSView`, GTK widget,
+QML item or XAML element, and custom widgets that are native where the platform has
 the control, and built ad hoc from the platform's widgets, drawn or composed
 where it doesn't. Apps can be written with `view!` and `#[component]`, and
 keep shared state in stores, resources and actions. Writing a backend starts
@@ -43,6 +45,7 @@ fn counter(initial: i32) -> impl View {
 | `mitsuami-test` | Test runner, a11y queries, actions, assertions, snapshots |
 | `mitsuami-appkit` | AppKit backend (macOS) |
 | `mitsuami-gtk` | GTK 4 backend (Linux) |
+| `mitsuami-kirigami` | Qt Quick and Kirigami backend (Linux, KDE Plasma; the `kde` feature) |
 | `mitsuami-winui` | WinUI 3 backend (Windows) |
 
 ## Testing
@@ -58,6 +61,8 @@ MITSUAMI_UPDATE_SNAPSHOTS=1 cargo test       # accept snapshot / visual baseline
 MITSUAMI_WAIT_MS=5000 cargo test             # longer wait for background work in assertions
 MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1 cargo test # skip native snapshots that depend on fonts, OS and scale
 MITSUAMI_IMAGE=macos-15 cargo test           # name the machine image native snapshots belong to (CI sets it)
+MITSUAMI_NATIVE=1 cargo test -p mitsuami -p mitsuami-kirigami \
+  --features mitsuami/kde,mitsuami-test/kde,mitsuami-kirigami/qt   # native tests on Kirigami
 ```
 
 Native snapshots and visual baselines depend on the machine, so they are
@@ -89,6 +94,16 @@ native tests need `gtk4-broadwayd`, GTK's in-memory display server: tests
 run on a private Broadway display (with desktop portals off), so windows get
 their exact sizes and dialogs stay off your desktop. `MITSUAMI_SHOW_WINDOWS=1`
 puts them on your display instead.
+
+For KDE Plasma, build with `mitsuami = { version = "…", default-features =
+false, features = ["kde"] }` (with `gtk` on too, `kde` wins). It needs the
+Qt 6.5+ development files (Qt Quick, Qt Quick Controls, Qt Widgets) and, at
+run time, Kirigami 6 and `qqc2-desktop-style`; Breeze gives it Plasma's look
+(without it, the controls fall back to Fusion). `platform!` has `kde` and
+`gtk` arms to tell the two Linux toolkits apart. Native tests run on Qt's
+offscreen platform, with Breeze Light or Dark forced and animations off. The
+test kit needs its own `kde` feature: `mitsuami-test = { …, features =
+["kde"] }`.
 
 UI test targets use `harness = false` and `mitsuami_test::main!()`, because
 native UI has to own the main thread. See `crates/mitsuami/tests/` for

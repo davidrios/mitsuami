@@ -22,6 +22,7 @@ mitsuami-macros = { path = "crates/mitsuami-macros", version = "=0.0.1" }
 mitsuami-appkit = { path = "crates/mitsuami-appkit", version = "=0.0.1" }
 mitsuami-gtk = { path = "crates/mitsuami-gtk", version = "=0.0.1" }
 mitsuami-winui = { path = "crates/mitsuami-winui", version = "=0.0.1" }
+mitsuami-kirigami = { path = "crates/mitsuami-kirigami", version = "=0.0.1" }
 
 slotmap = "1.1"
 taffy = "0.14"
@@ -31,6 +32,8 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 png = "0.18"
+cc = "1.2"
+pkg-config = "0.3"
 
 objc2 = "0.6"
 objc2-foundation = "0.3"

@@ -56,8 +56,12 @@ impl App {
         };
         #[cfg(target_os = "macos")]
         mitsuami_appkit::run(setup);
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "kde"))]
+        mitsuami_kirigami::run(setup);
+        #[cfg(all(target_os = "linux", feature = "gtk", not(feature = "kde")))]
         mitsuami_gtk::run(setup);
+        #[cfg(all(target_os = "linux", not(any(feature = "gtk", feature = "kde"))))]
+        let _ = setup;
         #[cfg(windows)]
         mitsuami_winui::run(setup);
         #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]

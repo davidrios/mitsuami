@@ -1,6 +1,7 @@
-//! A lock that guards changes, the GTK widget: `GtkLockButton` (`linux.rs`),
-//! the padlock GNOME Settings panels put in their header bars. Elsewhere
-//! it's composed from a built-in button.
+//! A lock that guards changes, the GTK widget: `GtkLockButton` (`gtk.rs`),
+//! the padlock GNOME Settings panels put in their header bars. On KDE it's
+//! Qt's own guard, a `DelayButton` that acts once held long enough
+//! (`kde.rs`). Elsewhere it's composed from a built-in button.
 //!
 //! It's controlled like every custom widget: a click asks to unlock or to
 //! lock, and the app decides (a password prompt, a policy check) and answers
@@ -8,8 +9,10 @@
 
 use mitsuami::prelude::*;
 
-#[cfg(target_os = "linux")]
-mod linux;
+#[cfg(all(target_os = "linux", not(feature = "kde")))]
+mod gtk;
+#[cfg(all(target_os = "linux", feature = "kde"))]
+mod kde;
 
 pub struct Lock;
 
@@ -58,7 +61,8 @@ fn composed(widget: Composed<Lock>) -> impl View {
 impl Render for Lock {
     fn renderer() -> Renderer<Self> {
         platform! {
-            linux => mitsuami::gtk::native::<Self>().with_composed(composed),
+            gtk => mitsuami::gtk::native::<Self>().with_composed(composed),
+            kde => mitsuami::kirigami::native::<Self>().with_composed(composed),
             _ => Renderer::composed(composed),
         }
     }

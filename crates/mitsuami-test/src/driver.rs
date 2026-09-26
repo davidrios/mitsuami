@@ -101,12 +101,24 @@ fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
 /// Tests run on a private display unless MITSUAMI_SHOW_WINDOWS=1 (see
 /// `mitsuami_gtk::init_for_tests`). GTK has no private clipboard, but
 /// the private display's clipboard is its own.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "kde")))]
 fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
     use mitsuami_gtk::{BackendOptions, GtkBackend};
     let _ = show_windows;
     mitsuami_gtk::init_for_tests();
     let backend = GtkBackend::new(BackendOptions { record_commands: true, appearance: Some(appearance) });
+    let hooks = backend.handle();
+    (Ui::new(backend), Box::new(hooks))
+}
+
+/// Tests run on Qt's offscreen platform unless MITSUAMI_SHOW_WINDOWS=1 (see
+/// `mitsuami_kirigami::init_for_tests`), whose clipboard is the process's own.
+#[cfg(all(target_os = "linux", feature = "kde"))]
+fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
+    use mitsuami_kirigami::{BackendOptions, KirigamiBackend};
+    let _ = show_windows;
+    mitsuami_kirigami::init_for_tests();
+    let backend = KirigamiBackend::new(BackendOptions { record_commands: true, appearance: Some(appearance) });
     let hooks = backend.handle();
     (Ui::new(backend), Box::new(hooks))
 }

@@ -7,7 +7,7 @@
 
 **Goals**
 
-- Native widgets only: AppKit (macOS), WinUI 3 (Windows), GTK 4 (Linux).
+- Native widgets only: AppKit (macOS), WinUI 3 (Windows), GTK 4 (Linux), or Qt Quick with Kirigami for KDE Plasma (Linux, a cargo feature).
 - One shared declarative layer, Vue-inspired (setup-once components, `signal`/`computed`/`watch`, props/emits/slots, provide/inject).
 - Layout owned by us: flexbox + grid (CSS semantics) with abstract units (`px`, `em`, `rem`, `%`, `vw`, `vh`, `fr`, platform tokens).
 - HiDPI works without app code doing anything special.
@@ -65,11 +65,11 @@
 | `mitsuami-core` | Node tree, components, widget kinds and props, styles and units, layout (Taffy), a11y model, focus, events, scheduler, backend trait. |
 | `mitsuami-widgets` | Built-in widget definitions: typed props, events and a11y defaults. Platform-free. |
 | `mitsuami-macros` | `#[component]` and `view!`. Pure sugar over the builder API. (`platform!` is a `macro_rules!` in `mitsuami`.) |
-| `mitsuami-appkit` / `mitsuami-winui` / `mitsuami-gtk` | Backend implementations and their `NativeRender` traits for custom widgets. |
+| `mitsuami-appkit` / `mitsuami-winui` / `mitsuami-gtk` / `mitsuami-kirigami` | Backend implementations and their `NativeRender` traits for custom widgets. |
 | `mitsuami-headless` | In-memory backend with deterministic fake measurement and wireframe rendering. The default backend for integration tests. |
 | `mitsuami-test` | Public testing toolkit (§12): test runner, a11y-based queries, actions, assertions, fake clock and services, snapshots, stories, visual capture and diff. |
 | `cargo-mitsuami` | CLI: `visual` (run, diff, review, accept baselines), and later scaffolding and gallery. |
-| `mitsuami` | Facade crate. Re-exports everything and selects the backend strictly by `cfg(target_os)`: AppKit on macOS, WinUI 3 on Windows, GTK 4 on Linux. There is no cross-toolkit override. |
+| `mitsuami` | Facade crate. Re-exports everything and selects the backend by `cfg(target_os)`: AppKit on macOS, WinUI 3 on Windows, and on Linux GTK 4, or Qt Quick with Kirigami with the `kde` feature. There is no cross-toolkit override: a toolkit is only used on its own platform. |
 
 ---
 
@@ -281,6 +281,7 @@ pub fn review_screen() -> impl View {
 
 - `platform!` is compile-time (`cfg`), so code for other platforms is never compiled into the binary. Arms may have different types.
 - Arms are `macos`, `windows`, `linux`, several joined with `|`, and a final `_`. The first matching arm wins.
+- On Linux, `gtk` and `kde` name the toolkit, settled when `mitsuami` is built (its `kde` feature); `linux` matches either.
 - Without a `_` arm, building for a platform no arm names fails, so a missing screen can't ship by accident.
 - Per-platform view files follow a convention: `review/mod.rs`, `review/macos.rs`, `review/shared.rs`. The shared screen is compiled everywhere so it can be tested everywhere.
 - Capability predicates on arms (`macos if has(…)`) wait for capabilities (§11).
@@ -359,9 +360,9 @@ impl Render for Rating {
 - A usage site is `Rating::view(move || RatingProps::new(stars.get())).on_event(…)`, the same on every platform. `.drawn()` and `.composed()` pick those renders where a native one exists.
 - **A widget native on one platform stands in on the others.** The renderer uses the first render it has: native, then drawn, then composed. A native render is either the platform's own control (`native::<W>()`) or built **ad hoc** from the platform's widgets the way that platform's apps build it (`ad_hoc::<W>()`), so it still looks at home. `Renderer::is_native()` is true only for the platform's own control, so a screen can be honest about it.
 - The `escape_hatches` example is one screen for every platform with three such widgets:
-  - a lock: native on GTK (`GtkLockButton`), composed elsewhere;
-  - a rating: native on macOS (`NSLevelIndicator`) and Windows (`RatingControl`), ad hoc on GTK (star buttons, as GNOME Software builds it), drawn elsewhere;
-  - a pips pager: native on Windows (WinUI's `PipsPager`), drawn elsewhere.
+  - a lock: native on GTK (`GtkLockButton`) and KDE (Qt's `DelayButton`, which acts once held), composed elsewhere;
+  - a rating: native on macOS (`NSLevelIndicator`) and Windows (`RatingControl`), ad hoc on GTK and KDE (star buttons, as GNOME Software and Discover build it), drawn elsewhere;
+  - a pips pager: native on Windows (WinUI's `PipsPager`) and KDE (Qt's `PageIndicator`), drawn elsewhere.
 - **A composed render** gets the props (reactive), a way to emit the widget's events, and the app's accessible label, which it puts on the control that stands for the widget. It builds as a plain container, so its built-in widgets carry the semantics.
 - **Compile-time coverage:** using a widget requires `Render`, and `Render` has to name a render that exists on the platform being built: a `NativeRender` impl or a `Drawn` one. A missing render doesn't build.
 - **Transport:** commands carry `WidgetKind::Custom(NAME)` and `Prop::Custom(CustomProps)`: the props as an `AnyValue` (type-erased, but still compared and printed with their own `PartialEq` and `Debug`) plus the widget's definition (semantics, action mapping, renders). Events come back as `UiEvent::Custom(AnyValue)`. Props don't need to be serializable. The native render travels with the props, so backends keep no registry.
@@ -457,21 +458,21 @@ which builds the same tree as `Column::new().gap(…).children((Text::new(…).t
 
 ## 10. Built-in widget set
 
-| Widget | AppKit | WinUI 3 | GTK 4 |
-|---|---|---|---|
-| Window | NSWindow | Window | gtk::Window + HeaderBar |
-| Container / Row / Column / Grid | flipped NSView host | Canvas host | custom Widget host |
-| Text | NSTextField (label) | TextBlock | gtk::Label |
-| Button | NSButton | Button | gtk::Button |
-| TextInput | NSTextField | TextBox | gtk::Entry |
-| Checkbox | NSButton (checkbox) | CheckBox | gtk::CheckButton |
-| Switch | NSSwitch | ToggleSwitch | gtk::Switch |
-| Slider | NSSlider | Slider | gtk::Scale |
-| Select | NSPopUpButton | ComboBox | gtk::DropDown |
-| Progress | NSProgressIndicator | ProgressBar / ProgressRing | gtk::ProgressBar / Spinner |
-| Image | NSImageView | Image | gtk::Picture |
-| ScrollView | NSScrollView | ScrollViewer | gtk::ScrolledWindow |
-| List (virtualised) | NSTableView | ListView | gtk::ListView |
+| Widget | AppKit | WinUI 3 | GTK 4 | Kirigami |
+|---|---|---|---|---|
+| Window | NSWindow | Window | gtk::Window + HeaderBar | Kirigami.ApplicationWindow + Page |
+| Container / Row / Column / Grid | flipped NSView host | Canvas host | custom Widget host | Item host |
+| Text | NSTextField (label) | TextBlock | gtk::Label | QQC2.Label |
+| Button | NSButton | Button | gtk::Button | QQC2.Button |
+| TextInput | NSTextField | TextBox | gtk::Entry | QQC2.TextField |
+| Checkbox | NSButton (checkbox) | CheckBox | gtk::CheckButton | QQC2.CheckBox |
+| Switch | NSSwitch | ToggleSwitch | gtk::Switch | QQC2.Switch |
+| Slider | NSSlider | Slider | gtk::Scale | QQC2.Slider |
+| Select | NSPopUpButton | ComboBox | gtk::DropDown | QQC2.ComboBox |
+| Progress | NSProgressIndicator | ProgressBar / ProgressRing | gtk::ProgressBar / Spinner | QQC2.ProgressBar / BusyIndicator |
+| Image | NSImageView | Image | gtk::Picture | Kirigami.Icon / Image |
+| ScrollView | NSScrollView | ScrollViewer | gtk::ScrolledWindow | QQC2.ScrollView |
+| List (virtualised) | NSTableView | ListView | gtk::ListView | ListView |
 
 **Idiomatic shell components (post-MVP).** These are where most of the "feels native" effect comes from:
 
@@ -496,6 +497,7 @@ We don't pick one fixed OS version per platform. Instead:
 | Windows | Whatever Windows App SDK 2.4 / WinUI 3 supports (historically 10 1809, build 17763; to be confirmed for 2.4) | Pinned to the SDK version that `windows-reactor` targets. |
 | macOS | macOS 11 | The practical floor for arm64 and current Rust targets. Everything newer is a capability. |
 | Linux | GTK 4.10, or GTK 4.8 in reduced mode | Chosen at build time through a cargo feature (`gtk_v4_8`, `gtk_v4_10`, `gtk_v4_12`, …). libadwaita versions work the same way under the `adwaita` feature. |
+| Linux (KDE Plasma) | Qt 6.5 and Kirigami 6 | The backend's build asks for Qt 6.5 (the first Qt 6 LTS with what it uses); a given Kirigami release may need a newer Qt. Developed on Qt 6.11 and Kirigami 6.30. Kirigami's features are resolved in QML at run time, not at build time. |
 
 ### Capability model
 
@@ -669,6 +671,7 @@ This is exposed as `Backend::capture`.
 | **M3 — WinUI 3** ✅ | The same widget set | The same tests and conformance suite pass with `--native` on Windows |
 | **M4 — Escape hatches** ✅ | `platform!`, `NativeView`, `CustomWidget` + `NativeRender` (+ drawn and composed fallbacks) | Demo: one screen for every platform, with three custom widgets, each native where the platform has the control and built ad hoc, drawn or composed elsewhere |
 | **M5 — Ergonomics** ✅ | `#[component]`, `view!`, stores, resources | Demo rewritten with macros |
+| **KDE Plasma** ✅ | Qt Quick and Kirigami backend (`mitsuami-kirigami`, the `kde` feature), after a spike (`spikes/kirigami`) | The same tests and conformance suite pass with `--native` on Kirigami |
 | **M6 — Visual review** | Stories, the variant matrix, perceptual diff, `cargo mitsuami visual review` HTML report, CI on three OSes | A PR that changes a widget shows up as a reviewable visual diff on all three platforms |
 
 Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, dialogs beyond an alert, the a11y implementation (the model exists), animations, and a devtools inspector.
@@ -685,7 +688,8 @@ Out of scope for the MVP: lists/virtualisation, menus beyond a basic app menu, d
 | `view!` syntax | JSX-like; the builder API remains the real API |
 | OS support | Backend floors plus capabilities (§11); Windows floor = whatever Windows App SDK 2.4 supports |
 | Layout ownership | Ours (Taffy); native widgets positioned absolutely |
-| Toolkit per platform | Strictly native: AppKit / WinUI 3 / GTK 4, one per OS, no cross-toolkit dev builds |
+| Toolkit per platform | Strictly native: AppKit / WinUI 3 / GTK 4, one per OS, no cross-toolkit dev builds. Linux has a second native toolkit, Qt Quick with Kirigami for KDE Plasma, picked at build time with the `kde` feature |
+| KDE backend | Qt Quick Controls and Kirigami (what current KDE apps use), not Qt Widgets. Driven through a small C++ layer compiled with `cc` and `moc` (no `cxx-qt`, no CMake): each node is a QML item created from a line of QML, its props set by name |
 | Windows bindings | windows-rs 0.100+ (`windows-reactor` ecosystem, WinAppSDK 2.4); MSRV 1.95, edition 2024 |
 | WinUI integration | Route (b): our own `windows-bindgen` bindings (minimal mode, member filters) over the WinAppSDK metadata, driven imperatively. No `windows-reactor` at runtime. `windows-reactor-setup` stays an option for self-contained staging |
 | Platform vs runtime checks | Platform is compile-time (`platform!`); capabilities are runtime |
@@ -757,6 +761,25 @@ What the GTK 4 backend taught us:
 - **Drawn widgets are XAML shapes built from markup.** The display list becomes a canvas of `Path`s loaded with `XamlReader`. Semantic colors become `{ThemeResource …}` brushes (`TextFillColorPrimaryBrush`, `AccentFillColorDefaultBrush`, …), so they follow the element's theme live. Every shape is a path, so strokes are centred on the outline as on the other platforms. Pointer presses and releases on the canvas become `Pointer` events; `SyntheticInput::Click` emits them directly.
 - **Native views' accessibility actions** go through the control's UIA patterns: Invoke or Toggle for Activate, RangeValue for Increment/Decrement, Value (or RangeValue) for SetValue.
 - **WinUI's controls in the example:** `PipsPager` is WinUI's own, and so is `RatingControl`, so the rating is native on Windows as well as on macOS. WinUI has no lock button, so the lock is composed there.
+
+### KDE Plasma (Qt Quick and Kirigami)
+
+The spike (`spikes/kirigami`) settled the route; the backend is `crates/mitsuami-kirigami`.
+
+- **A C++ layer, not bindings.** Qt has no maintained Rust bindings for driving arbitrary QML items (`cxx-qt` exposes Rust objects to QML, the other way round). `cpp/shim.cpp` is a C API over `QObject*`: items are created from one line of QML each (`QQC2.Button { }`, compiled once per text), properties go through `QObject::setProperty`, and every signal reaches Rust through one callback with a key naming a Rust closure, dropped with its object. `build.rs` finds Qt with pkg-config and runs moc on the one header that declares QObjects. The crate builds empty without its `qt` feature, so the workspace builds where Qt isn't installed.
+- **Picked by a feature.** `mitsuami`'s `kde` feature swaps GTK for Kirigami (and wins if `gtk` is on too); the test kit has its own `kde` feature; `platform!` has `kde` and `gtk` arms, settled when `mitsuami` is built.
+- **Windows are a `Kirigami.ApplicationWindow` with one page,** whose title shows in Kirigami's toolbar; the page's content item is the layout host. The toolbar's height is only known once Kirigami's page stack is laid out, which Qt does when it polishes before a frame. Resizing the window until the content matched overshot (the host lags a polish behind) and shrank the window to a pixel. The backend now polishes the window's items first, measures the toolbar, and checks again at the first frame; windows are sized in whole pixels.
+- **Items are born with their implicit size.** A Qt Quick item's size follows its implicit size until one is set, so the backend zeroes every frame on creation (the rule AppKit taught, §16).
+- **Measuring is synchronous:** `implicitWidth`/`implicitHeight`, even for the desktop style's QStyle-drawn controls. Wrapping text measures its height by setting `width`; min-content is `Text.WordWrap` at width 1, which leaves the longest word as `contentWidth`.
+- **User-only signals.** `toggled` and `textEdited` fire only for the user, so built-in controls need no muting. But a `SpinBox` stepped by a screen reader (`Increase`) changes its value without `valueModified`: native views observe `valueChanged`, and the backend mutes its own updates, as on WinUI.
+- **Accessibility actions are Qt's own:** `Press`, `Toggle`, `Increase` through `QAccessible`, as Orca's would. They also focus the control, as a click does, unlike AppKit's press; the focus change is reported like any other. Disabled controls accept them and do nothing, so the backend checks `enabled` first.
+- **Real input.** Qt can inject key and mouse events: typing, Backspace, Return, Tab and clicks on drawn widgets are real `QKeyEvent`s and `QMouseEvent`s, where GTK 4 needed keybinding signals.
+- **The Tab order is an event filter** on the window: Qt Quick's chain follows item order within each parent.
+- **Tests run on Qt's offscreen platform** (no display server, exact window sizes, software rendering, so captures don't depend on the GPU). The desktop's settings stay out: no platform theme, a private `kdeglobals`, Plasma's default font. Light and dark are Breeze Light and Breeze Dark, switched the way KDE apps' color scheme menus do (`KDE_COLOR_SCHEME_PATH` and a palette change). The private `kdeglobals` turns animations off (`AnimationDurationFactor=0`): captures caught a switch's knob mid-slide.
+- **Captions.** Without Plasma's platform theme, Kirigami's small font falls back to a 12 pt system font, larger than the body; captions are then 0.8 × the body, Plasma's ratio.
+- **Teardown.** A backend can be dropped with the thread-locals that hold it as the process exits, after Qt's thread data or KDE's icon loader has gone: destroying a window then crashed. Dropped backends post their windows' deletion instead, a new backend flushes what earlier ones posted (their controls still held Kirigami's Alt-key mnemonics, which moved the underlines in the next test's capture), and at exit a C++ thread-local sentinel drops what is still queued.
+- **Qt's own controls in the example:** the lock is a `DelayButton` and the pager a `PageIndicator`, both native; the rating is built ad hoc from tool buttons with Breeze's star icons, as Discover does.
+- **Known gaps.** Plasma's look needs the Breeze widget style installed; without it the desktop style falls back to Fusion, which doesn't show Primary buttons (`highlighted`). Breeze has no destructive button style. The desktop style's scroll bars take room from the view, which the core doesn't know about, so a vertical bar covers the content's right edge. Windows show no menu button when the app has no menus of its own, so Quit (Ctrl+Q) needs one. `FolderDialog` picks one folder.
 
 ## 17. Implementation notes (M0.5 WinUI spike)
 

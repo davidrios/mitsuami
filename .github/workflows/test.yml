@@ -83,3 +83,50 @@ jobs:
           name: snapshots-${{ matrix.os }}
           path: snapshots.tar
           if-no-files-found: ignore
+
+  # The Qt Quick and Kirigami backend (the `kde` feature) on its own:
+  # Kirigami 6 isn't packaged for Ubuntu 24.04, so this runs in an Arch Linux
+  # container. Arch is rolling, so its native snapshots and baselines
+  # (tests/{snapshots,visual}/kirigami/archlinux/) can change with Qt and KDE
+  # updates. GTK 4 is there too: the test kit depends on it on Linux.
+  kde:
+    name: Test (KDE Plasma)
+    if: ${{ !inputs.headless_only }}
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install Qt, Kirigami, Breeze and GTK 4
+        run: |
+          pacman -Syu --noconfirm --needed git rustup qt6-declarative kirigami qqc2-desktop-style \
+            breeze breeze-icons noto-fonts gtk4
+
+      - uses: actions/checkout@v5
+
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test (native, Kirigami)
+        shell: bash
+        run: |
+          .github/scripts/cargo-test.sh kde -p mitsuami -p mitsuami-kirigami \
+            --features mitsuami/kde,mitsuami-test/kde,mitsuami-kirigami/qt
+        env:
+          MITSUAMI_NATIVE: "1"
+          MITSUAMI_IMAGE: archlinux
+
+      - name: Collect snapshots for review
+        if: failure()
+        shell: bash
+        run: |
+          find crates -path '*/tests/*' \( -name '*.new' -o -name '*.new.png' -o -name '*.diff.png' \) -print0 \
+            | tar --null -cf snapshots.tar -T -
+
+      - name: Upload snapshots for review
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: snapshots-archlinux-kde
+          path: snapshots.tar
+          if-no-files-found: ignore

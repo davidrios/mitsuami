@@ -1,8 +1,8 @@
 # Writing a mitsuami backend
 
-This guide is for writing a platform backend: GTK 4 (`mitsuami-gtk`), WinUI 3 (`mitsuami-winui`), or any other.
+This guide is for writing a platform backend: GTK 4 (`mitsuami-gtk`), WinUI 3 (`mitsuami-winui`), Qt Quick and Kirigami (`mitsuami-kirigami`), or any other.
 
-**Working references:** the AppKit backend (`crates/mitsuami-appkit`) and the GTK 4 backend (`crates/mitsuami-gtk`). Every rule here is enforced by the test suites, and many were learned the hard way.
+**Working references:** the AppKit backend (`crates/mitsuami-appkit`) and the GTK 4 backend (`crates/mitsuami-gtk`). The Kirigami backend (`crates/mitsuami-kirigami`) shows a toolkit without Rust bindings: a small C++ layer, and QML created per node. Every rule here is enforced by the test suites, and many were learned the hard way.
 
 **Background:** read [ARCHITECTURE.md](ARCHITECTURE.md) §2–§5 first.
 
@@ -34,6 +34,8 @@ You also touch three places outside your crate, each behind a `cfg(target_os = �
    - Add your OS to `native_available()`.
 3. **`crates/mitsuami-<name>/Cargo.toml`:** put native dependencies under `[target.'cfg(target_os = "…")'.dependencies]`, so the workspace still builds everywhere.
 
+A second toolkit on an OS is a cargo feature rather than a `cfg(target_os)`: Kirigami next to GTK on Linux is `mitsuami`'s `kde` feature (which wins over the default `gtk`), `mitsuami-test`'s `kde` feature, and the `kde` and `gtk` arms of `platform!`. A backend whose native libraries may be missing where the workspace builds keeps them behind a feature of its own (`mitsuami-kirigami`'s `qt`), so it builds empty without it.
+
 Keep a shareable handle (`Rc<RefCell<State>>` inside the backend, with a cloneable handle outside). `Ui::new` takes ownership of the backend, but tests, services and the run loop still need access to it.
 
 ## 3. Commands
@@ -62,19 +64,19 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 
 ### Widget kinds
 
-| Kind | AppKit (done) | GTK 4 (done) | WinUI 3 (done) |
-|---|---|---|---|
-| `Window` | `NSWindow` + flipped content host | `gtk::Window` + `HeaderBar` + host as child (done) | `Window` + `Canvas` as `Content` |
-| `Container` (layout host) | flipped `NSView` subclass | `gtk::Widget` subclass that allocates children at given frames (or `gtk::Fixed`) | `Canvas` (`Canvas.Left/Top`, `Width/Height`) |
-| `Text` | `NSTextField` wrapping label | `gtk::Label` (wrap on, `xalign 0`) | `TextBlock` (`TextWrapping.Wrap`) |
-| `Button` | `NSButton` push | `gtk::Button` | `Button` |
-| `TextInput` | `NSTextField` | `gtk::Entry` / `gtk::Text` | `TextBox` |
-| `Checkbox` | `NSButton` checkbox | `gtk::CheckButton` | `CheckBox` |
-| `Switch` | `NSSwitch` | `gtk::Switch` | `ToggleSwitch` |
-| `ScrollView` | `NSScrollView` | `gtk::ScrolledWindow` | `ScrollViewer` |
-| `Custom` (native render) | the render's view (`NativeRender`) | the render's widget (`mitsuami_gtk::NativeRender`) | the render's element |
-| `Custom` (drawn) | `DrawnView`: flipped `NSView` that rasterizes the display list | a `gtk::DrawingArea` rasterized with Cairo | a `Canvas` with Win2D, or `Microsoft.UI.Composition` shapes |
-| `Native` | the app's `NSView` (`NativeView::appkit`) | the app's `gtk::Widget` (`NativeView::gtk`) | the app's `FrameworkElement` |
+| Kind | AppKit (done) | GTK 4 (done) | WinUI 3 (done) | Kirigami (done) |
+|---|---|---|---|---|
+| `Window` | `NSWindow` + flipped content host | `gtk::Window` + `HeaderBar` + host as child (done) | `Window` + `Canvas` as `Content` | `Kirigami.ApplicationWindow` with one `Kirigami.Page`, a plain `Item` as its content |
+| `Container` (layout host) | flipped `NSView` subclass | `gtk::Widget` subclass that allocates children at given frames (or `gtk::Fixed`) | `Canvas` (`Canvas.Left/Top`, `Width/Height`) | `Item` (children at `x`/`y`/`width`/`height`) |
+| `Text` | `NSTextField` wrapping label | `gtk::Label` (wrap on, `xalign 0`) | `TextBlock` (`TextWrapping.Wrap`) | `QQC2.Label` (`WordWrap`) |
+| `Button` | `NSButton` push | `gtk::Button` | `Button` | `QQC2.Button` |
+| `TextInput` | `NSTextField` | `gtk::Entry` / `gtk::Text` | `TextBox` | `QQC2.TextField` |
+| `Checkbox` | `NSButton` checkbox | `gtk::CheckButton` | `CheckBox` | `QQC2.CheckBox` |
+| `Switch` | `NSSwitch` | `gtk::Switch` | `ToggleSwitch` | `QQC2.Switch` |
+| `ScrollView` | `NSScrollView` | `gtk::ScrolledWindow` | `ScrollViewer` | `QQC2.ScrollView` around a `Flickable` |
+| `Custom` (native render) | the render's view (`NativeRender`) | the render's widget (`mitsuami_gtk::NativeRender`) | the render's element | the render's item |
+| `Custom` (drawn) | `DrawnView`: flipped `NSView` that rasterizes the display list | a `gtk::DrawingArea` rasterized with Cairo | a `Canvas` with Win2D, or `Microsoft.UI.Composition` shapes | a `QQuickPaintedItem` painted with `QPainter` |
+| `Native` | the app's `NSView` (`NativeView::appkit`) | the app's `gtk::Widget` (`NativeView::gtk`) | the app's `FrameworkElement` | the app's QML item (`NativeView::qml`) |
 
 ### Props
 
@@ -87,8 +89,8 @@ Validate as you go. Panic on protocol violations such as an unknown node, a doub
 | `Placeholder` | TextInput | |
 | `Checked` | Checkbox, Switch | Setting it programmatically **must not** emit `Changed` (§4). |
 | `Enabled` | controls | |
-| `TextStyle` | Text (and controls) | Map to the platform type ramp: GTK style classes (`title-1`, `heading`, `caption`, `monospace`); WinUI text styles (`TitleTextBlockStyle`, …). |
-| `Variant` | Button | Primary = the default / suggested action (GTK `suggested-action`, WinUI `AccentButtonStyle`); Destructive (GTK `destructive-action`); Plain = borderless (GTK `flat`). |
+| `TextStyle` | Text (and controls) | Map to the platform type ramp: GTK style classes (`title-1`, `heading`, `caption`, `monospace`); WinUI text styles (`TitleTextBlockStyle`, …); Kirigami's `Heading` sizes and its small and fixed-width fonts. |
+| `Variant` | Button | Primary = the default / suggested action (GTK `suggested-action`, WinUI `AccentButtonStyle`, Qt `highlighted`); Destructive (GTK `destructive-action`); Plain = borderless (GTK and Qt `flat`). |
 | `ScrollAxes` | ScrollView | Which scrollbars / scroll directions exist. |
 | `Custom` | Custom | The widget's props and definition. Native render: call its `update` when they differ. Drawn: just keep them for `native_state`. See §8a. |
 | `Drawing` | Custom (drawn) | The display list to rasterize. Redraw. |
@@ -101,8 +103,8 @@ Native callbacks **only** call `events.emit(id, event)` on the `EventSink` given
 | Event | Emit when | Don't emit when |
 |---|---|---|
 | `Click` | a button is pressed (mouse, keyboard or accessibility) | |
-| `Changed(Text)` | the user (or assistive technology) edits a text field | the core set the value. **GTK `changed` and WinUI `TextChanged` fire on programmatic sets**, so block or ignore them during `SetProp`. |
-| `Changed(Bool)` | the user toggles a checkbox or switch | the core set `Checked`. **GTK `toggled`/`notify::active` and WinUI `Checked`/`Unchecked`/`Toggled` fire on programmatic sets**, so guard them. |
+| `Changed(Text)` | the user (or assistive technology) edits a text field | the core set the value. **GTK `changed` and WinUI `TextChanged` fire on programmatic sets**, so block or ignore them during `SetProp`. Qt's `textEdited` is the user's only. |
+| `Changed(Bool)` | the user toggles a checkbox or switch | the core set `Checked`. **GTK `toggled`/`notify::active` and WinUI `Checked`/`Unchecked`/`Toggled` fire on programmatic sets**, so guard them. Qt's `toggled` is the user's only (`checkedChanged` is anyone's). |
 | `Submit` | **Return/Enter** in a text field (GTK `activate`; WinUI `KeyDown` with `Enter`) | editing ends in other ways: Tab, a click elsewhere, focus loss. AppKit's field action does fire then; that was a real bug. |
 | `FocusIn` / `FocusOut` | keyboard focus moves, **from any source** (click, Tab, code): out for the old control first, then in for the new | |
 | `Scrolled(offset)` | a ScrollView's offset changes, by the user **or** by `ScrollTo` | |
@@ -112,7 +114,7 @@ Native callbacks **only** call `events.emit(id, event)` on the `EventSink` given
 | `Pointer(event)` | primary button down / up on a **drawn** custom widget, in its coordinates | |
 | `Custom(value)` | a native render or native view emits (through your `Emitter`) | |
 
-Focus tracking needs one global observer, not per-widget guesses. Examples: AppKit uses KVO on `NSWindow.firstResponder`, GTK can use `notify::focus-widget` on the window, and WinUI uses a bubbling `GotFocus` on the window's root. WinUI raises it asynchronously, so its backend also reports the focus moves it makes itself right away, and drops the late event. Map the focused native object to the nearest known node by walking up its parents. Composite widgets (a text field's inner editor, a scrolled window's viewport) put focus on children you didn't create.
+Focus tracking needs one global observer, not per-widget guesses. Examples: AppKit uses KVO on `NSWindow.firstResponder`, GTK can use `notify::focus-widget` on the window, Qt Quick has the window's `activeFocusItemChanged`, and WinUI uses a bubbling `GotFocus` on the window's root. WinUI raises it asynchronously, so its backend also reports the focus moves it makes itself right away, and drops the late event. Map the focused native object to the nearest known node by walking up its parents. Composite widgets (a text field's inner editor, a scrolled window's viewport) put focus on children you didn't create.
 
 ## 5. Measuring
 
@@ -125,6 +127,7 @@ Focus tracking needs one global observer, not per-widget guesses. Examples: AppK
 
 Platform hints:
 - **GTK:** `widget.measure(Orientation, for_size)` gives the minimum and natural sizes. Use natural for max-content and minimum for min-content.
+- **Qt Quick:** `implicitWidth`/`implicitHeight`, right as soon as an item exists or its text changes, with no polish in between. Wrapping text: set `width` and read `implicitHeight`. Min-content: `Text.WordWrap` at width 1 leaves the longest word as `contentWidth` (`Text.Wrap` would break it). Restore the frame's width afterwards.
 - **WinUI:** `element.Measure(available)` then `DesiredSize`. Elements must be in a live tree: before that, a `Button` measures `0 × 19`. The frame's `Width`/`Height` must be lifted to Auto (NaN) for the call, because `Measure` returns an explicit size.
 
 Known gap on AppKit: min-content falls back to max-content. If your platform gives min-content cheaply (GTK does), implement it properly.
@@ -158,6 +161,7 @@ These make one test suite run against every backend.
   - AppKit: `cacheDisplayInRect:toBitmapImageRep:`, which replies immediately. The test window is never key, so captures show the unfocused-window look (grey default buttons).
   - GTK: `gtk::WidgetPaintable` + snapshot + `render_texture` (Cairo renderer), then download. Replies from the frame clock's `after-paint`, once the widget is mapped and laid out.
   - WinUI: `RenderTargetBitmap.RenderAsync`, then `GetPixelsAsync`, replying from the completion.
+  - Qt Quick: `QQuickWindow::grabWindow`, which renders right away (in software on the offscreen platform), cropped to the node.
 
 **`TestHooks::settle`** runs after every settle and while a test awaits something the platform completes (a capture). Use it to let the platform catch up without blocking: GTK presents windows there and dispatches what its main context has ready (allocations, adjustments, focus). AppKit does everything synchronously and leaves it empty.
 
@@ -165,18 +169,18 @@ These make one test suite run against every backend.
 
 Implement `Services`. **Never block**: reply later, from the platform's completion callback.
 
-| Service | AppKit | GTK 4 | WinUI 3 |
-|---|---|---|---|
-| clipboard read (async reply) | `NSPasteboard` (replies immediately) | `gdk::Clipboard::read_text_async` | `Clipboard.GetContent().GetTextAsync()` |
-| clipboard write (async reply, can fail) | `NSPasteboard` (replies immediately) | `gdk::Clipboard::set_text` | `Clipboard.SetContent` (throws while another process holds the clipboard: reply `Err`) |
-| alert | `NSAlert` sheet on the parent | `gtk::AlertDialog::choose` | `ContentDialog` (one at a time per window) |
-| open / save | `NSOpenPanel` / `NSSavePanel` sheets with `UTType` filters | `gtk::FileDialog` (`open`/`open_multiple`/`save`) with `gtk::FileFilter` | `FileOpenPicker` / `FileSavePicker` (need the window handle: `InitializeWithWindow`) |
-| menus | the global `NSMenu` bar: app menu, the app's File, Edit, the rest | `gio::Menu` on the application (`set_menubar`) or a `PopoverMenuBar` in each window | a `MenuBar` in each window |
+| Service | AppKit | GTK 4 | WinUI 3 | Kirigami |
+|---|---|---|---|---|
+| clipboard read (async reply) | `NSPasteboard` (replies immediately) | `gdk::Clipboard::read_text_async` | `Clipboard.GetContent().GetTextAsync()` | `QClipboard` (replies immediately) |
+| clipboard write (async reply, can fail) | `NSPasteboard` (replies immediately) | `gdk::Clipboard::set_text` | `Clipboard.SetContent` (throws while another process holds the clipboard: reply `Err`) | `QClipboard` (replies immediately) |
+| alert | `NSAlert` sheet on the parent | `gtk::AlertDialog::choose` | `ContentDialog` (one at a time per window) | `Kirigami.PromptDialog` in the window's overlay |
+| open / save | `NSOpenPanel` / `NSSavePanel` sheets with `UTType` filters | `gtk::FileDialog` (`open`/`open_multiple`/`save`) with `gtk::FileFilter` | `FileOpenPicker` / `FileSavePicker` (need the window handle: `InitializeWithWindow`) | Qt Quick's `FileDialog` / `FolderDialog` (Plasma's own through its platform theme) |
+| menus | the global `NSMenu` bar: app menu, the app's File, Edit, the rest | `gio::Menu` on the application (`set_menubar`) or a `PopoverMenuBar` in each window | a `MenuBar` in each window | a `Kirigami.GlobalDrawer` shown as a menu (`isMenu`) in each window |
 
 - **`parent: None`** means the active window: AppKit uses the key window, then the main window. Only fall back to app-modal if there is no window.
 - **Menus inside the window** (GTK without a global menu, WinUI): the menu bar takes space the core doesn't know about. Put it above your content host, and report the **remaining** content size in `WindowResized`.
 - Keep the platform's standard menus (Quit, Edit with Cut/Copy/Paste/Undo) and leave their enabling to the platform. The app's own items follow its `enabled` state.
-- `Shortcut::primary` is Ctrl on GTK and WinUI.
+- `Shortcut::primary` is Ctrl on GTK, Qt and WinUI.
 
 ## 8a. Escape hatches: custom widgets and native views
 
@@ -198,6 +202,7 @@ Also:
 - **AppKit:** turn off `autorecalculatesKeyViewLoop` and link `nextKeyView` into a loop.
 - **GTK 4:** there is no "next widget" pointer. The window's content host overrides the `focus` vfunc: for Tab and Shift+Tab it `grab_focus`es the next widget in the order that accepts focus, wrapping around; other directions keep GTK's behaviour.
 - **WinUI:** `TabIndex` is scoped to each container, so it can't express a window-wide order across nested hosts. Handle Tab in `PreviewKeyDown` on the window's root and focus the next control in the order yourself, as on GTK.
+- **Qt Quick:** its focus chain follows item order within each parent. An event filter on the window handles Tab and Shift+Tab along the core's order, skipping disabled and hidden items; popups (dialogs, menus) keep Qt's own chain.
 
 The conformance tests use three controls arranged so that reading order and position on screen disagree (RTL rows, absolute positioning, `tab_index`). An order based on position fails them, as it should.
 
@@ -214,12 +219,12 @@ The conformance tests use three controls arranged so that reading order and posi
 
 Platform hints:
 
-| Step | AppKit (done) | GTK 4 | WinUI 3 (done) |
-|---|---|---|---|
-| tick before sleeping | `CFRunLoopObserver` (BeforeWaiting, common modes) | an idle source that is re-added when scheduled (`glib::idle_add_local_once`), guarded by a "scheduled" flag | our own `PeekMessage` loop (no `Application::Start`) ticks before it sleeps; ticks are also scheduled with `DispatcherQueue.TryEnqueue`, which runs inside modal loops (live resizing) |
-| thread-safe wake | `CFRunLoopWakeUp` | `glib::MainContext::default().invoke(...)` to schedule the tick | `PostThreadMessageW(WM_NULL)` to the UI thread |
-| timer | one `CFRunLoopTimer`, re-armed | a `glib::timeout_add_local_once` replaced on re-arm | the timeout of `MsgWaitForMultipleObjectsEx` |
-| stop | `stop:` **plus an empty posted event** (otherwise it waits for the next real event) | `app.quit()` | leave the loop, then release XAML objects while XAML still runs |
+| Step | AppKit (done) | GTK 4 | WinUI 3 (done) | Kirigami (done) |
+|---|---|---|---|---|
+| tick before sleeping | `CFRunLoopObserver` (BeforeWaiting, common modes) | an idle source that is re-added when scheduled (`glib::idle_add_local_once`), guarded by a "scheduled" flag | our own `PeekMessage` loop (no `Application::Start`) ticks before it sleeps; ticks are also scheduled with `DispatcherQueue.TryEnqueue`, which runs inside modal loops (live resizing) | the event dispatcher's `aboutToBlock` |
+| thread-safe wake | `CFRunLoopWakeUp` | `glib::MainContext::default().invoke(...)` to schedule the tick | `PostThreadMessageW(WM_NULL)` to the UI thread | `QAbstractEventDispatcher::wakeUp` |
+| timer | one `CFRunLoopTimer`, re-armed | a `glib::timeout_add_local_once` replaced on re-arm | the timeout of `MsgWaitForMultipleObjectsEx` | one single-shot `QTimer`, re-armed |
+| stop | `stop:` **plus an empty posted event** (otherwise it waits for the next real event) | `app.quit()` | leave the loop, then release XAML objects while XAML still runs | `QCoreApplication::quit` (`quitOnLastWindowClosed` off: the core decides) |
 
 Never call `tick()` from inside a widget callback; the loop calls it.
 
@@ -254,6 +259,7 @@ cargo run -p mitsuami --example showcase        # look at it
 
 - **`tests/conformance.rs` is the contract.** Get it green first; the other suites mostly follow.
 - **Platforms that report asynchronously** implement `TestHooks::pump`: tests call it while settling, and while a test awaits native work (a capture). WinUI needs it. Report what your backend causes itself right away, rather than waiting for the platform's event, so settles stay deterministic.
+- **On Kirigami**, the backend and the test kit need their features: `MITSUAMI_NATIVE=1 cargo test -p mitsuami -p mitsuami-kirigami --features mitsuami/kde,mitsuami-test/kde,mitsuami-kirigami/qt`.
 - **On Windows**, build with the MSVC toolchain: `cargo +1.96-x86_64-pc-windows-msvc test` if your default host is gnu.
 - **Mirror checks** run after every settle, comparing native and core children, props, frames, focus and scroll offsets. A failure names the node and the difference.
 - **Visual baselines** are stored per backend and machine image in `tests/visual/<name>/<image>/` (ARCHITECTURE.md §12). The first run creates them; look at them. CI records its own: a failing run uploads them, and `.github/scripts/accept-snapshots.sh <run id>` accepts them.
