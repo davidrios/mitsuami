@@ -47,9 +47,10 @@ pub use mitsuami_headless::{FakeServicesHandle, Pending, PendingAlert, PendingOp
 pub use mitsuami_test_macros::{story, test};
 pub use query::{Query, by_label, by_role, by_test_id, by_text};
 pub use story::Variant;
+pub use visual::VisualOptions;
 
 pub mod prelude {
-    pub use crate::{Expectation, Locator, Query, TestApp, by_label, by_role, by_test_id, by_text};
+    pub use crate::{Expectation, Locator, Query, TestApp, VisualOptions, by_label, by_role, by_test_id, by_text};
     pub use mitsuami_core::{Key, Rect, Role, Size};
 }
 
@@ -93,6 +94,8 @@ pub mod __private {
         /// or `None` to fit the content's.
         pub sizes: &'static [(f32, Option<f32>)],
         pub variants: &'static [crate::Variant],
+        /// How its captures are compared with their baselines.
+        pub visual: fn() -> crate::VisualOptions,
         /// Mounts the story and plays its script, if any.
         pub run: for<'a> fn(&'a crate::TestApp) -> StoryFuture<'a>,
     }

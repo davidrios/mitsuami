@@ -83,5 +83,9 @@ harness = false
 name = "stories"
 harness = false
 
+[[test]]
+name = "visual"
+harness = false
+
 [lints]
 workspace = true

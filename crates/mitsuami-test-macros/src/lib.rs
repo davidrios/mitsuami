@@ -85,6 +85,14 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - `variants`: `Light`, `Dark`. The default is both.
 /// - `play`: an `async fn(&TestApp)` that brings the view into the state to
 ///   capture (focus a field, type text) once it is mounted.
+/// - `threshold`: how different two colours must look for a pixel to count
+///   as changed, from 0 to 1. The default is 0.1.
+/// - `max_changed`: the fraction of pixels that may change. The default is
+///   0.001.
+/// - `ignore`: queries whose nodes' frames are left out of the comparison,
+///   like `[by_test_id("clock")]`: a blinking caret's field, a clock.
+///
+/// See `VisualOptions`, which tests pass to `assert_visual_snapshot_with`.
 ///
 /// Headless has no pixels: there, stories only check that the view mounts
 /// and the script plays.
@@ -93,6 +101,9 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut sizes: Option<Vec<(syn::Expr, syn::Expr)>> = None;
     let mut variants: Option<Vec<syn::Ident>> = None;
     let mut play: Option<syn::Path> = None;
+    let mut threshold: Option<syn::Expr> = None;
+    let mut max_changed: Option<syn::Expr> = None;
+    let mut ignore: Vec<syn::Expr> = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("sizes") {
             let syn::Expr::Array(array) = meta.value()?.parse()? else {
@@ -136,8 +147,19 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
             variants = Some(list);
         } else if meta.path.is_ident("play") {
             play = Some(meta.value()?.parse()?);
+        } else if meta.path.is_ident("threshold") {
+            threshold = Some(meta.value()?.parse()?);
+        } else if meta.path.is_ident("max_changed") {
+            max_changed = Some(meta.value()?.parse()?);
+        } else if meta.path.is_ident("ignore") {
+            let syn::Expr::Array(array) = meta.value()?.parse()? else {
+                return Err(meta.error("expected a list of queries: `ignore = [by_test_id(\"clock\")]`"));
+            };
+            ignore = array.elems.into_iter().collect();
         } else {
-            return Err(meta.error("unknown option; the options are `sizes`, `variants` and `play`"));
+            return Err(meta.error(
+                "unknown option; the options are `sizes`, `variants`, `play`, `threshold`, `max_changed` and `ignore`",
+            ));
         }
         Ok(())
     });
@@ -172,6 +194,8 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
         ]
     });
     let play = play.map(|play| quote! { #play(app).await; });
+    let threshold = threshold.map(|t| quote! { .threshold((#t) as f64) });
+    let max_changed = max_changed.map(|m| quote! { .max_changed((#m) as f64) });
     quote! {
         #func
 
@@ -181,6 +205,12 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
                 manifest_dir: ::core::env!("CARGO_MANIFEST_DIR"),
                 sizes: #sizes,
                 variants: &[#(::mitsuami_test::Variant::#variants),*],
+                visual: {
+                    fn __mitsuami_visual() -> ::mitsuami_test::VisualOptions {
+                        ::mitsuami_test::VisualOptions::new() #threshold #max_changed #(.ignore(#ignore))*
+                    }
+                    __mitsuami_visual
+                },
                 run: {
                     fn __mitsuami_story(
                         app: &::mitsuami_test::TestApp,

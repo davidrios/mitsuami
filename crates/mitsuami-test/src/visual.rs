@@ -1,4 +1,4 @@
-//! Visual baselines: PNG captures compared with a tolerance.
+//! Visual baselines: PNG captures compared with a perceptual diff.
 //!
 //! Baselines live in `<crate>/tests/visual/<backend>/<image>/`. Native
 //! rendering differs between OS versions and display scales, so baselines
@@ -9,48 +9,119 @@
 //! mismatches fail and write `<name>.new.png` plus `<name>.diff.png` (on CI
 //! too, which uploads them), `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes,
 //! and `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips them all.
+//!
+//! The diff is pixelmatch's: colours are compared by their distance in YIQ,
+//! which follows how different they look, and pixels that differ only by
+//! anti-aliasing (an edge that moved by a fraction of a pixel, a glyph
+//! rasterized a little differently) don't count.
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
+use mitsuami_core::Rect;
 use mitsuami_core::backend::Image;
 
 use crate::app::TestContext;
+use crate::query::Query;
 
-/// A channel may differ this much before a pixel counts as changed
-/// (absorbs anti-aliasing and subpixel noise).
-const CHANNEL_TOLERANCE: u8 = 24;
-/// Fraction of changed pixels allowed.
-const MAX_CHANGED_RATIO: f64 = 0.001;
+/// How a capture is compared with its baseline.
+///
+/// ```ignore
+/// app.assert_visual_snapshot_with(
+///     "ticking",
+///     &VisualOptions::new().ignore(by_test_id("clock")).max_changed(0.01),
+/// )
+/// .await;
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct VisualOptions {
+    pub(crate) threshold: f64,
+    pub(crate) max_changed: f64,
+    pub(crate) ignore: Vec<Query>,
+    pub(crate) ignore_rects: Vec<Rect>,
+}
+
+impl Default for VisualOptions {
+    fn default() -> VisualOptions {
+        VisualOptions { threshold: 0.1, max_changed: 0.001, ignore: Vec::new(), ignore_rects: Vec::new() }
+    }
+}
+
+impl VisualOptions {
+    pub fn new() -> VisualOptions {
+        VisualOptions::default()
+    }
+
+    /// How different two colours must look for a pixel to count as
+    /// changed, from 0 (any difference) to 1. The default is 0.1.
+    pub fn threshold(mut self, threshold: f64) -> VisualOptions {
+        self.threshold = threshold.clamp(0.0, 1.0);
+        self
+    }
+
+    /// The fraction of pixels that may change before the snapshot fails.
+    /// The default is 0.001 (0.1%).
+    pub fn max_changed(mut self, fraction: f64) -> VisualOptions {
+        self.max_changed = fraction.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Leaves out the frames of the nodes `query` finds, where they are at
+    /// capture time: a blinking caret's field, a clock. The query must find
+    /// at least one node.
+    pub fn ignore(mut self, query: Query) -> VisualOptions {
+        self.ignore.push(query);
+        self
+    }
+
+    /// Leaves out a region, in window coordinates.
+    pub fn ignore_rect(mut self, rect: Rect) -> VisualOptions {
+        self.ignore_rects.push(rect);
+        self
+    }
+}
 
 fn write_png(path: &Path, width: u32, height: u32, rgba: &[u8]) {
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create baseline directory");
-    let file = BufWriter::new(File::create(path).expect("create png"));
-    let mut encoder = png::Encoder::new(file, width, height);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("cannot create {}: {e}", parent.display()));
+    }
+    let file = File::create(path).unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+    let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header().and_then(|mut w| w.write_image_data(rgba)).expect("write png");
+    let mut writer = encoder.write_header().expect("PNG header");
+    writer.write_image_data(rgba).expect("PNG data");
 }
 
 fn read_png(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
-    let file = BufReader::new(File::open(path).ok()?);
-    let mut decoder = png::Decoder::new(file);
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let decoder = png::Decoder::new(BufReader::new(File::open(path).ok()?));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
-    (info.color_type == png::ColorType::Rgba).then_some((info.width, info.height, buf))
+    // Baselines are written as 8-bit RGBA.
+    (info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight).then_some((
+        info.width,
+        info.height,
+        buf,
+    ))
 }
 
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
-    let stem = path.file_stem().unwrap().to_string_lossy();
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!("{stem}.{suffix}.png"))
 }
 
-#[track_caller]
-pub(crate) fn assert(context: &TestContext, machine: &Path, name: &str, image: &Image) {
+/// `ignored` holds the regions to leave out, in window coordinates.
+pub(crate) fn assert(
+    context: &TestContext,
+    machine: &Path,
+    name: &str,
+    image: &Image,
+    options: &VisualOptions,
+    ignored: &[Rect],
+) {
     if crate::snapshot::skip_machine_snapshots() {
         return;
     }
@@ -82,23 +153,18 @@ pub(crate) fn assert(context: &TestContext, machine: &Path, name: &str, image: &
     let problem = if (width, height) != (image.width, image.height) {
         Some(format!("size changed from {width}×{height} to {}×{}", image.width, image.height))
     } else {
-        let mut diff = Vec::with_capacity(expected.len());
-        let mut changed = 0usize;
-        for (a, b) in expected.chunks_exact(4).zip(image.rgba.chunks_exact(4)) {
-            let delta = a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
-            if delta > CHANNEL_TOLERANCE {
-                changed += 1;
-                diff.extend_from_slice(&[255, 0, 0, 255]);
-            } else {
-                // Faded original, so the red changes stand out.
-                diff.extend(b[..3].iter().map(|c| 255 - (255 - c) / 4));
-                diff.push(255);
-            }
-        }
-        let ratio = changed as f64 / (width as f64 * height as f64);
-        (ratio > MAX_CHANGED_RATIO).then(|| {
-            write_png(&diff_path, width, height, &diff);
-            format!("{changed} pixels changed ({:.3}%)", ratio * 100.0)
+        let mask = Mask::new(width, height, image.scale_factor, ignored);
+        let diff = compare(&expected, &image.rgba, width, height, options.threshold, &mask);
+        let considered = mask.considered();
+        let ratio = if considered == 0 { 0.0 } else { diff.changed as f64 / considered as f64 };
+        (ratio > options.max_changed).then(|| {
+            write_png(&diff_path, width, height, &diff.image);
+            format!(
+                "{} pixels changed ({:.3}%, {:.3}% allowed)",
+                diff.changed,
+                ratio * 100.0,
+                options.max_changed * 100.0
+            )
         })
     };
 
@@ -122,4 +188,163 @@ pub(crate) fn assert(context: &TestContext, machine: &Path, name: &str, image: &
             ));
         }
     }
+}
+
+/// The pixels to leave out, from regions in window coordinates: each is
+/// rounded outwards to whole physical pixels.
+struct Mask {
+    width: u32,
+    ignored: Vec<bool>,
+}
+
+impl Mask {
+    fn new(width: u32, height: u32, scale: f32, regions: &[Rect]) -> Mask {
+        let mut ignored = vec![false; (width * height) as usize];
+        for r in regions {
+            let px = |v: f32, max: u32, round: fn(f32) -> f32| round(v * scale).clamp(0.0, max as f32) as u32;
+            let (x0, x1) = (px(r.x(), width, f32::floor), px(r.x() + r.width(), width, f32::ceil));
+            let (y0, y1) = (px(r.y(), height, f32::floor), px(r.y() + r.height(), height, f32::ceil));
+            for y in y0..y1 {
+                let row = (y * width) as usize;
+                ignored[row + x0 as usize..row + x1 as usize].fill(true);
+            }
+        }
+        Mask { width, ignored }
+    }
+
+    fn is_ignored(&self, x: u32, y: u32) -> bool {
+        self.ignored[(y * self.width + x) as usize]
+    }
+
+    fn considered(&self) -> usize {
+        self.ignored.iter().filter(|i| !**i).count()
+    }
+}
+
+struct Diff {
+    changed: usize,
+    /// The capture faded, with changes in red, anti-aliasing in yellow and
+    /// ignored regions in blue.
+    image: Vec<u8>,
+}
+
+/// The largest YIQ distance between two colours (black and white).
+const MAX_DELTA: f64 = 35215.0;
+
+fn compare(expected: &[u8], actual: &[u8], width: u32, height: u32, threshold: f64, mask: &Mask) -> Diff {
+    let max_delta = MAX_DELTA * threshold * threshold;
+    let mut image = Vec::with_capacity(actual.len());
+    let mut changed = 0;
+    for y in 0..height {
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            let colour = if mask.is_ignored(x, y) {
+                Some([96, 160, 255])
+            } else if colour_delta(expected, actual, i, i, false).abs() <= max_delta {
+                None
+            } else if antialiased(expected, actual, x, y, width, height)
+                || antialiased(actual, expected, x, y, width, height)
+            {
+                Some([255, 200, 0])
+            } else {
+                changed += 1;
+                Some([255, 0, 0])
+            };
+            match colour {
+                Some(c) => image.extend_from_slice(&c),
+                // Faded capture, so the changes stand out.
+                None => image.extend(actual[i..i + 3].iter().map(|c| 255 - (255 - c) / 4)),
+            }
+            image.push(255);
+        }
+    }
+    Diff { changed, image }
+}
+
+/// Whether the pixel at (`x`, `y`) in `a` is likely anti-aliasing: it lies
+/// on an edge between a darker and a brighter neighbour, and one of those
+/// has flat surroundings in both images. From pixelmatch, after "Anti-
+/// aliased Pixel and Intensity Slope Detector" (Vysniauskas, 2009).
+fn antialiased(a: &[u8], b: &[u8], x: u32, y: u32, width: u32, height: u32) -> bool {
+    let (x0, y0) = (x.saturating_sub(1), y.saturating_sub(1));
+    let (x1, y1) = ((x + 1).min(width - 1), (y + 1).min(height - 1));
+    let at = |x: u32, y: u32| ((y * width + x) * 4) as usize;
+    let centre = at(x, y);
+    // Pixels on the image's edge have fewer neighbours: count the missing
+    // ones as equal.
+    let mut zeroes = usize::from(x == x0 || x == x1 || y == y0 || y == y1);
+    let (mut min, mut max) = (0.0, 0.0);
+    let (mut min_at, mut max_at) = ((0, 0), (0, 0));
+    for ny in y0..=y1 {
+        for nx in x0..=x1 {
+            if (nx, ny) == (x, y) {
+                continue;
+            }
+            // Brightness only.
+            let delta = colour_delta(a, a, centre, at(nx, ny), true);
+            if delta == 0.0 {
+                zeroes += 1;
+                // More than two equal neighbours: a flat area, not an edge.
+                if zeroes > 2 {
+                    return false;
+                }
+            } else if delta < min {
+                (min, min_at) = (delta, (nx, ny));
+            } else if delta > max {
+                (max, max_at) = (delta, (nx, ny));
+            }
+        }
+    }
+    // Neighbours only darker or only brighter: not between two colours.
+    if min == 0.0 || max == 0.0 {
+        return false;
+    }
+    (flat_around(a, min_at, width, height) && flat_around(b, min_at, width, height))
+        || (flat_around(a, max_at, width, height) && flat_around(b, max_at, width, height))
+}
+
+/// Whether at least three neighbours of (`x`, `y`) have exactly its colour.
+fn flat_around(img: &[u8], (x, y): (u32, u32), width: u32, height: u32) -> bool {
+    let (x0, y0) = (x.saturating_sub(1), y.saturating_sub(1));
+    let (x1, y1) = ((x + 1).min(width - 1), (y + 1).min(height - 1));
+    let at = |x: u32, y: u32| ((y * width + x) * 4) as usize;
+    let centre = &img[at(x, y)..at(x, y) + 4];
+    let mut zeroes = usize::from(x == x0 || x == x1 || y == y0 || y == y1);
+    for ny in y0..=y1 {
+        for nx in x0..=x1 {
+            if (nx, ny) != (x, y) && img[at(nx, ny)..at(nx, ny) + 4] == *centre {
+                zeroes += 1;
+                if zeroes > 2 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The squared YIQ distance between two pixels, each blended over white.
+/// Negative when the second is brighter. `y_only` compares brightness.
+fn colour_delta(a: &[u8], b: &[u8], i: usize, j: usize, y_only: bool) -> f64 {
+    let blend = |p: &[u8], k: usize| {
+        let alpha = f64::from(p[k + 3]) / 255.0;
+        let c = |v: u8| 255.0 + (f64::from(v) - 255.0) * alpha;
+        (c(p[k]), c(p[k + 1]), c(p[k + 2]))
+    };
+    let (r1, g1, b1) = blend(a, i);
+    let (r2, g2, b2) = blend(b, j);
+    if (r1, g1, b1) == (r2, g2, b2) {
+        return 0.0;
+    }
+    let luma = |r: f64, g: f64, b: f64| r * 0.298_895_31 + g * 0.586_622_47 + b * 0.114_482_23;
+    let y = luma(r1, g1, b1) - luma(r2, g2, b2);
+    if y_only {
+        return y;
+    }
+    let i_ = |r: f64, g: f64, b: f64| r * 0.595_977_99 - g * 0.274_176_10 - b * 0.321_801_89;
+    let q = |r: f64, g: f64, b: f64| r * 0.211_470_17 - g * 0.522_617_46 + b * 0.311_147_29;
+    let i_delta = i_(r1, g1, b1) - i_(r2, g2, b2);
+    let q_delta = q(r1, g1, b1) - q(r2, g2, b2);
+    let delta = 0.5053 * y * y + 0.299 * i_delta * i_delta + 0.1957 * q_delta * q_delta;
+    if y > 0.0 { -delta } else { delta }
 }

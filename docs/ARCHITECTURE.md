@@ -628,7 +628,7 @@ This is exposed as `Backend::capture`.
 - Stored in the repo as plain files for now (git LFS when volume demands it). A hosted store can be added later behind the same interface.
 
 **Diffing.**
-- Perceptual diff: anti-aliasing tolerant, with a per-story threshold and ignore regions (e.g. a blinking caret or a system clock).
+- Perceptual diff: pixelmatch's. Colours are compared by their distance in YIQ, and pixels that differ only by anti-aliasing don't count. `VisualOptions` (the story options of the same names) sets the `threshold` for how different a colour must look (0.1 by default), `max_changed` for the fraction of pixels that may change (0.1% by default), and regions to leave out: nodes found by a query, where they are at capture time (`ignore(by_test_id("clock"))`), or rects in window coordinates. The `.diff.png` shows changes in red, anti-aliasing in yellow and ignored regions in blue.
 - A **layout-only diff** from the wireframe snapshot runs first. It says *why* pixels moved: a layout change versus a native rendering change.
 
 **Review.**

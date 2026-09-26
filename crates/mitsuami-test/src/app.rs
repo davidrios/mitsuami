@@ -12,6 +12,7 @@ use mitsuami_reactive::Owner;
 use crate::driver::{Driver, Mode};
 use crate::locator::{Expectation, Locator};
 use crate::query::{Query, by_label, by_role, by_test_id, by_text};
+use crate::visual::VisualOptions;
 use crate::{format, snapshot, visual};
 
 pub(crate) struct TestContext {
@@ -301,11 +302,25 @@ impl TestApp {
     /// Captures the window and compares it with the PNG baseline in
     /// `tests/visual/<backend>/<image>/`. Headless has no pixels, so it skips.
     pub async fn assert_visual_snapshot(&self, name: &str) {
+        self.assert_visual_snapshot_with(name, &VisualOptions::default()).await;
+    }
+
+    /// [`assert_visual_snapshot`](Self::assert_visual_snapshot) with a
+    /// threshold, an allowance for changed pixels, or regions to leave out.
+    pub async fn assert_visual_snapshot_with(&self, name: &str, options: &VisualOptions) {
+        // Where the ignored nodes are now. Resolved headless too, so a query
+        // that finds nothing fails everywhere.
+        let mut ignored = options.ignore_rects.clone();
+        for query in &options.ignore {
+            let frames = self.get(query.clone()).frames();
+            assert!(!frames.is_empty(), "a visual snapshot ignores {query}, which finds nothing");
+            ignored.extend(frames);
+        }
         let capture = self.ui.capture(self.window());
         match self.drive(capture) {
             Ok(image) => {
                 let machine = self.machine_dir().expect("only native backends capture");
-                visual::assert(&self.context, &machine, name, &image)
+                visual::assert(&self.context, &machine, name, &image, options, &ignored)
             }
             Err(mitsuami_core::backend::CaptureError::Unsupported) => {}
             Err(e) => panic!("cannot capture the window: {e:?}"),

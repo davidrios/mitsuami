@@ -90,6 +90,11 @@ impl<'a> Locator<'a> {
         self.node().frame
     }
 
+    /// The frames of every node the query finds, in window coordinates.
+    pub fn frames(&self) -> Vec<Rect> {
+        self.all().into_iter().map(|n| n.frame).collect()
+    }
+
     /// Accessible name (for text: its content).
     pub fn text(&self) -> Option<String> {
         self.node().name

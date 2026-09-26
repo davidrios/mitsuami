@@ -62,7 +62,13 @@ struct Job {
 
 enum JobKind {
     Test(fn(TestApp) -> TestFuture),
-    Story { run: for<'a> fn(&'a TestApp) -> StoryFuture<'a>, size: WindowSize, variant: Variant, label: String },
+    Story {
+        run: for<'a> fn(&'a TestApp) -> StoryFuture<'a>,
+        visual: fn() -> crate::VisualOptions,
+        size: WindowSize,
+        variant: Variant,
+        label: String,
+    },
 }
 
 fn display_name(name: &'static str) -> &'static str {
@@ -93,7 +99,7 @@ fn jobs() -> Vec<Job> {
                     file_prefix: story.name.replace("::", "__"),
                     manifest_dir: story.manifest_dir,
                     headless_only: false,
-                    kind: JobKind::Story { run: story.run, size, variant, label },
+                    kind: JobKind::Story { run: story.run, visual: story.visual, size, variant, label },
                 });
             }
         }
@@ -176,11 +182,11 @@ pub fn run_main() {
                     let app = TestApp::new(context, mode, Appearance::Light, DEFAULT_WINDOW.into());
                     block_on(run(app));
                 }
-                JobKind::Story { run, size, variant, label } => {
+                JobKind::Story { run, visual, size, variant, label } => {
                     let app = TestApp::new(context, mode, variant.appearance(), size);
                     block_on(async {
                         run(&app).await;
-                        app.assert_visual_snapshot(&label).await;
+                        app.assert_visual_snapshot_with(&label, &visual()).await;
                     });
                 }
             })
