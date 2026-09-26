@@ -17,8 +17,11 @@ QQC2.DelayButton {
     text: locked ? "Hold to Unlock" : "Hold to Lock"
     icon.name: locked ? "object-locked" : "object-unlocked"
     delay: 600
-    // Not a toggle: once it has asked, it's ready to be held again.
-    onActivated: { button.requested(); button.checked = false }
+    // Not a toggle: once it has asked, it's ready to be held again. Qt
+    // checks it on the release that follows a full hold (unchecking it on
+    // activation had the release check it again), so it's unchecked then.
+    onActivated: button.requested()
+    onReleased: button.checked = false
     signal requested()
 }
 "#;
