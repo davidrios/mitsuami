@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  EXAMPLES: showcase todos escape_hatches
+
+jobs:
+  version:
+    name: Check the tag matches the workspace version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "mitsuami") | .version')
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match workspace version ${version}"
+            exit 1
+          fi
+
+  # Build and headless tests on every OS. The native suites don't gate
+  # releases yet.
+  test:
+    needs: version
+    uses: ./.github/workflows/test.yml
+    with:
+      headless_only: true
+
+  publish:
+    name: Publish to crates.io
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # `cargo publish` builds every crate before uploading, and the GTK
+      # backend needs the system GTK 4 headers to build.
+      - name: Install GTK 4
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+
+      # Publishes every workspace crate in dependency order.
+      - name: Publish
+        run: cargo publish --workspace
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  examples:
+    name: Build the examples (${{ matrix.name }})
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-24.04 }
+          - { name: macos-universal, os: macos-15 }
+          - { name: windows-x86_64, os: windows-2025 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARCHIVE: mitsuami-examples-${{ github.ref_name }}-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Install GTK 4
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+
+      - name: Build
+        if: runner.os != 'macOS'
+        run: cargo build --release -p mitsuami $(printf -- '--example %s ' $EXAMPLES)
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir "$ARCHIVE"
+          for e in $EXAMPLES; do cp "target/release/examples/$e" "$ARCHIVE/"; done
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+
+      # One binary for Apple silicon and Intel Macs.
+      - name: Build and package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release -p mitsuami --target "$t" $(printf -- '--example %s ' $EXAMPLES)
+          done
+          mkdir "$ARCHIVE"
+          for e in $EXAMPLES; do
+            lipo -create -output "$ARCHIVE/$e" \
+              "target/aarch64-apple-darwin/release/examples/$e" \
+              "target/x86_64-apple-darwin/release/examples/$e"
+          done
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir "$ARCHIVE"
+          for e in $EXAMPLES; do cp "target/release/examples/$e.exe" "$ARCHIVE/"; done
+          7z a "$ARCHIVE.zip" "$ARCHIVE"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}.*
+
+  release:
+    name: Create the GitHub release
+    needs: [publish, examples]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        run: |
+          cat > notes.md <<'EOF'
+          ## Examples
+
+          The `showcase`, `todos` and `escape_hatches` examples, built for each platform:
+
+          - **Windows** (x86_64): needs the [Windows App Runtime 2.4 or later](https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-x64.exe).
+          - **macOS** (Apple silicon and Intel): the binaries aren't signed. Run `xattr -dr com.apple.quarantine <folder>` after extracting, or allow them in System Settings → Privacy & Security.
+          - **Linux** (x86_64): needs GTK 4.10 or later and glibc 2.39 or later (Ubuntu 24.04 and newer).
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
