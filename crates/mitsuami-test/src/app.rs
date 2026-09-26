@@ -1,4 +1,5 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,23 @@ pub(crate) struct TestContext {
     pub name: String,
     pub file_prefix: String,
     pub manifest_dir: &'static str,
+    /// Snapshots that are missing or don't match. They fail the test when
+    /// it ends rather than stopping it, so one run writes every snapshot
+    /// pending review.
+    pub snapshot_failures: Rc<RefCell<Vec<String>>>,
+}
+
+impl TestContext {
+    #[track_caller]
+    pub(crate) fn fail_snapshot(&self, message: String) {
+        let location = std::panic::Location::caller();
+        self.snapshot_failures.borrow_mut().push(format!(
+            "{message}
+  at {}:{}",
+            location.file(),
+            location.line()
+        ));
+    }
 }
 
 /// The app under test: a [`Ui`] with one window, driven by the test.
@@ -225,11 +243,20 @@ impl TestApp {
         self.ui.inspect(self.window()).expect("the test window exists")
     }
 
+    /// Where the native backends' snapshots and baselines go, under
+    /// `tests/snapshots/` and `tests/visual/`: `<backend>/<image>`. `None`
+    /// headless, whose snapshots don't depend on the machine.
+    fn machine_dir(&self) -> Option<PathBuf> {
+        (!self.is_headless())
+            .then(|| Path::new(self.backend_name()).join(snapshot::image(self.ui.metrics().scale_factor)))
+    }
+
     /// Compares the native tree (kinds, text, frames in window
-    /// coordinates) with `tests/snapshots/<test>@<name>.tree.txt`.
+    /// coordinates) with `tests/snapshots/[<backend>/<image>/]<test>@<name>.tree.txt`.
     #[track_caller]
     pub fn assert_tree_snapshot(&self, name: &str) {
-        snapshot::assert(&self.context, Some(self.backend_name()), name, "tree.txt", &format::tree(&self.inspect()));
+        let machine = self.machine_dir();
+        snapshot::assert(&self.context, machine.as_deref(), name, "tree.txt", &format::tree(&self.inspect()));
     }
 
     /// Compares the accessibility tree with a snapshot.
@@ -242,28 +269,27 @@ impl TestApp {
     /// Compares an SVG wireframe of the layout with a snapshot.
     #[track_caller]
     pub fn assert_wireframe_snapshot(&self, name: &str) {
-        snapshot::assert(
-            &self.context,
-            Some(self.backend_name()),
-            name,
-            "wireframe.svg",
-            &format::wireframe(&self.inspect()),
-        );
+        let machine = self.machine_dir();
+        snapshot::assert(&self.context, machine.as_deref(), name, "wireframe.svg", &format::wireframe(&self.inspect()));
     }
 
     /// Compares the commands sent to the backend since the last call.
     #[track_caller]
     pub fn assert_commands_snapshot(&self, name: &str) {
         let log = self.driver.take_command_log();
-        snapshot::assert(&self.context, Some(self.backend_name()), name, "commands.txt", &format::commands(&log));
+        let machine = self.machine_dir();
+        snapshot::assert(&self.context, machine.as_deref(), name, "commands.txt", &format::commands(&log));
     }
 
     /// Captures the window and compares it with the PNG baseline in
-    /// `tests/visual/<backend>/`. Headless has no pixels, so it skips.
+    /// `tests/visual/<backend>/<image>/`. Headless has no pixels, so it skips.
     pub async fn assert_visual_snapshot(&self, name: &str) {
         let capture = self.ui.capture(self.window());
         match self.drive(capture) {
-            Ok(image) => visual::assert(&self.context, self.backend_name(), name, &image),
+            Ok(image) => {
+                let machine = self.machine_dir().expect("only native backends capture");
+                visual::assert(&self.context, &machine, name, &image)
+            }
             Err(mitsuami_core::backend::CaptureError::Unsupported) => {}
             Err(e) => panic!("cannot capture the window: {e:?}"),
         }

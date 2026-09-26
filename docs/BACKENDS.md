@@ -256,7 +256,7 @@ cargo run -p mitsuami --example showcase        # look at it
 - **Platforms that report asynchronously** implement `TestHooks::pump`: tests call it while settling, and while a test awaits native work (a capture). WinUI needs it. Report what your backend causes itself right away, rather than waiting for the platform's event, so settles stay deterministic.
 - **On Windows**, build with the MSVC toolchain: `cargo +1.96-x86_64-pc-windows-msvc test` if your default host is gnu.
 - **Mirror checks** run after every settle, comparing native and core children, props, frames, focus and scroll offsets. A failure names the node and the difference.
-- **Visual baselines** are stored per backend in `tests/visual/<name>/`. The first run creates them; look at them.
+- **Visual baselines** are stored per backend and machine image in `tests/visual/<name>/<image>/` (ARCHITECTURE.md §12). The first run creates them; look at them. CI records its own: a failing run uploads them, and `.github/scripts/accept-snapshots.sh <run id>` accepts them.
 - **Headless-only tests** (fake metrics, simulated system changes) are skipped in native runs.
 - **Your real services** aren't exercised by app tests, which use a scripted fake. Copy `mitsuami-appkit/tests/services.rs`: a private clipboard if possible, the real menu structure plus an activation, an alert answered through its real button, and a cancelled file dialog.
 

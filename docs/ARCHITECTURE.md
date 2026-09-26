@@ -607,7 +607,7 @@ fn counter_big_number() -> impl View { Counter(42) }
 
 Stories can also be interaction states. `#[story(play = ...)]` runs a test script first (e.g. focus a field, type text) and then captures the result.
 
-Each size and variant runs as its own test, named `<story>@<width>x<height>-<variant>` (`signup_ready@280x148-dark`), in a window opened at that size with the variant's appearance forced. Its baseline is `tests/visual/<backend>/<story>@<width>x<height>-<variant>.png`. `sizes` defaults to the test window's 800×600, and `variants` to `[Light, Dark]`. Headless has no pixels, so there a story only checks that the view mounts and the script plays. `crates/mitsuami/tests/stories.rs` has the built-in widgets as stories.
+Each size and variant runs as its own test, named `<story>@<width>x<height>-<variant>` (`signup_ready@280x148-dark`), in a window opened at that size with the variant's appearance forced. Its baseline is `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`. `sizes` defaults to the test window's 800×600, and `variants` to `[Light, Dark]`. Headless has no pixels, so there a story only checks that the view mounts and the script plays. `crates/mitsuami/tests/stories.rs` has the built-in widgets as stories.
 
 **Capture.** Capture happens in-process and offscreen, so no screen-recording permissions are needed and nothing depends on window placement:
 
@@ -620,8 +620,10 @@ This is exposed as `Backend::capture`.
 **Matrix.** Each capture is taken for every combination of platform, scale factor (1×, 2×), light/dark, and optionally high contrast and large text.
 
 **Baselines.**
-- Keyed by `platform / os-image / story / variant`. Native rendering differs between OS versions, so baselines are tied to a pinned CI image per platform.
-- Stored in the repo under `visual/` using git LFS. A hosted store can be added later behind the same interface.
+- Keyed by `platform / os-image / story / variant`. Native rendering differs between OS versions and display scales, so baselines belong to the machine image that recorded them: `tests/visual/<backend>/<image>/`, and the native tree, wireframe and command snapshots likewise in `tests/snapshots/<backend>/<image>/`. Headless snapshots don't depend on the machine and stay in `tests/snapshots/`.
+- The image is `MITSUAMI_IMAGE`, which CI sets to its pinned runner image (`macos-15`, `ubuntu-24.04`, `windows-2025`). Otherwise it's the OS and its version (`macos-26`, `ubuntu-24.04`, `windows-26100`). A scale other than 1× is appended (`macos-26@2x`), since captures are in physical pixels. A developer's baselines and CI's live side by side, and each machine only compares with its own.
+- Snapshot failures don't stop a test. It fails at the end with all of them, having written every missing or changed one next to its baseline (`.new`, `.new.png`, plus a `.diff.png`), on CI too. CI uploads them as a `snapshots-<image>` artifact, and `.github/scripts/accept-snapshots.sh <run id>` moves them over the baselines. That's also how a new image, or a new platform's first baselines, gets recorded.
+- Stored in the repo as plain files for now (git LFS when volume demands it). A hosted store can be added later behind the same interface.
 
 **Diffing.**
 - Perceptual diff: anti-aliasing tolerant, with a per-story threshold and ignore regions (e.g. a blinking caret or a system clock).

@@ -67,7 +67,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// state to capture it in. It runs as one test per size and variant, which
 /// mounts the view in a window of that size, plays the script if there is
 /// one, then compares a capture of the window with its baseline in
-/// `tests/visual/<backend>/<story>@<width>x<height>-<variant>.png`.
+/// `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`.
 ///
 /// ```ignore
 /// #[mitsuami_test::story(sizes = [(320, 200)], variants = [Light, Dark], play = type_a_name)]

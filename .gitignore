@@ -1,2 +1,5 @@
 target/
-*.snap.new
+# Snapshots and captures pending review, and visual diffs
+*.new
+*.new.png
+*.diff.png

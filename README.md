@@ -56,8 +56,15 @@ MITSUAMI_NATIVE=1 cargo test                 # the same tests on the native back
 MITSUAMI_SHOW_WINDOWS=1 MITSUAMI_NATIVE=1 cargo test   # …and watch them
 MITSUAMI_UPDATE_SNAPSHOTS=1 cargo test       # accept snapshot / visual baseline changes
 MITSUAMI_WAIT_MS=5000 cargo test             # longer wait for background work in assertions
-MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1 cargo test # skip native snapshots that depend on fonts, OS and scale (CI)
+MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1 cargo test # skip native snapshots that depend on fonts, OS and scale
+MITSUAMI_IMAGE=macos-15 cargo test           # name the machine image native snapshots belong to (CI sets it)
 ```
+
+Native snapshots and visual baselines depend on the machine, so they are
+kept per machine image: `tests/{snapshots,visual}/<backend>/<image>/`, where
+the image defaults to the OS and its version (`macos-26@2x`). CI records its
+own; when a run fails on missing or changed ones, it uploads them, and
+`.github/scripts/accept-snapshots.sh <run id>` accepts them.
 
 Stories (`#[mitsuami_test::story]`) render a view in a given state and
 compare a capture with a baseline at each size, in light and dark: see

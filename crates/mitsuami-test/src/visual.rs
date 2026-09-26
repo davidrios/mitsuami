@@ -1,13 +1,14 @@
 //! Visual baselines: PNG captures compared with a tolerance.
 //!
-//! Baselines live in `<crate>/tests/visual/<backend>/`. Native rendering
-//! differs between OS versions, so baselines belong to the machine image
-//! that produced them (pinned CI runners, eventually).
+//! Baselines live in `<crate>/tests/visual/<backend>/<image>/`. Native
+//! rendering differs between OS versions and display scales, so baselines
+//! belong to the machine image that produced them: CI's pinned runners, or
+//! a developer's OS (see `snapshot::image`).
 //!
 //! Same rules as text snapshots: missing baselines are created (not on CI),
-//! mismatches fail and write `<name>.new.png` plus `<name>.diff.png`, and
-//! `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes, and
-//! `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips them all.
+//! mismatches fail and write `<name>.new.png` plus `<name>.diff.png` (on CI
+//! too, which uploads them), `MITSUAMI_UPDATE_SNAPSHOTS=1` accepts changes,
+//! and `MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1` skips them all.
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -49,23 +50,29 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
 }
 
 #[track_caller]
-pub(crate) fn assert(context: &TestContext, backend: &str, name: &str, image: &Image) {
+pub(crate) fn assert(context: &TestContext, machine: &Path, name: &str, image: &Image) {
     if crate::snapshot::skip_machine_snapshots() {
         return;
     }
-    let file = PathBuf::from(context.manifest_dir).join("tests").join("visual").join(backend).join(format!(
+    let file = PathBuf::from(context.manifest_dir).join("tests").join("visual").join(machine).join(format!(
         "{}@{}.png",
         context.file_prefix,
         crate::snapshot::sanitize(name)
     ));
     let pending = sibling(&file, "new");
     let diff_path = sibling(&file, "diff");
-    let update = std::env::var("MITSUAMI_UPDATE_SNAPSHOTS").is_ok_and(|v| v == "1" || v == "true");
-    let ci = std::env::var_os("CI").is_some();
+    let update = crate::snapshot::updating();
+    let ci = crate::snapshot::on_ci();
 
     let Some((width, height, expected)) = read_png(&file) else {
         if ci && !update {
-            panic!("visual baseline {} is missing (not created on CI)", file.display());
+            write_png(&pending, image.width, image.height, &image.rgba);
+            context.fail_snapshot(format!(
+                "visual baseline {} is missing (not created on CI); the capture is in {}",
+                file.display(),
+                pending.display()
+            ));
+            return;
         }
         write_png(&file, image.width, image.height, &image.rgba);
         eprintln!("mitsuami-test: created visual baseline {}", file.display());
@@ -106,15 +113,13 @@ pub(crate) fn assert(context: &TestContext, backend: &str, name: &str, image: &I
             let _ = std::fs::remove_file(&diff_path);
         }
         Some(problem) => {
-            if !ci {
-                write_png(&pending, image.width, image.height, &image.rgba);
-            }
-            panic!(
+            write_png(&pending, image.width, image.height, &image.rgba);
+            context.fail_snapshot(format!(
                 "visual baseline {} does not match: {problem}\nnew: {}\ndiff: {}",
                 file.display(),
                 pending.display(),
                 diff_path.display()
-            );
+            ));
         }
     }
 }

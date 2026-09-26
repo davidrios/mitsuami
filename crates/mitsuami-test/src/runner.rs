@@ -4,6 +4,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::io::Write;
 use std::panic::{self, AssertUnwindSafe};
+use std::rc::Rc;
 use std::time::Instant;
 
 use mitsuami_core::{Appearance, Size};
@@ -158,7 +159,13 @@ pub fn run_main() {
             ignored += 1;
             continue;
         }
-        let context = TestContext { name: name.clone(), file_prefix: job.file_prefix, manifest_dir: job.manifest_dir };
+        let snapshot_failures = Rc::new(RefCell::new(Vec::new()));
+        let context = TestContext {
+            name: name.clone(),
+            file_prefix: job.file_prefix,
+            manifest_dir: job.manifest_dir,
+            snapshot_failures: snapshot_failures.clone(),
+        };
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             with_pool(|| match job.kind {
                 JobKind::Test(run) => {
@@ -174,13 +181,16 @@ pub fn run_main() {
                 }
             })
         }));
-        match result {
-            Ok(()) => println!("ok"),
-            Err(payload) => {
-                println!("FAILED");
-                let message = PANIC_MESSAGE.with(|m| m.borrow_mut().take()).unwrap_or_else(|| payload_text(&*payload));
-                failures.push((name, message));
-            }
+        let mut messages: Vec<String> = Vec::new();
+        if let Err(payload) = result {
+            messages.push(PANIC_MESSAGE.with(|m| m.borrow_mut().take()).unwrap_or_else(|| payload_text(&*payload)));
+        }
+        messages.extend(snapshot_failures.take());
+        if messages.is_empty() {
+            println!("ok");
+        } else {
+            println!("FAILED");
+            failures.push((name, messages.join("\n\n")));
         }
     }
     let _ = panic::take_hook();

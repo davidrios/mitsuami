@@ -56,12 +56,30 @@ jobs:
         shell: bash
         run: .github/scripts/cargo-test.sh headless
 
-      # Snapshots that depend on the machine's fonts, OS version and scale
-      # are skipped until baselines are kept per image (docs/ARCHITECTURE.md §12).
+      # Native snapshots and visual baselines depend on the machine's fonts,
+      # OS version and scale, so they are kept per runner image
+      # (tests/{snapshots,visual}/<backend>/<image>/, docs/ARCHITECTURE.md §12).
       - name: Test (native)
         if: ${{ !inputs.headless_only }}
         shell: bash
         run: .github/scripts/cargo-test.sh native
         env:
           MITSUAMI_NATIVE: "1"
-          MITSUAMI_SKIP_MACHINE_SNAPSHOTS: "1"
+          MITSUAMI_IMAGE: ${{ matrix.os }}
+
+      # Missing and changed snapshots, and the diffs, at their paths in the
+      # repository. `.github/scripts/accept-snapshots.sh <run id>` accepts them.
+      - name: Collect snapshots for review
+        if: failure()
+        shell: bash
+        run: |
+          find crates -path '*/tests/*' \( -name '*.new' -o -name '*.new.png' -o -name '*.diff.png' \) -print0 \
+            | tar --null -cf "$RUNNER_TEMP/snapshots.tar" -T -
+
+      - name: Upload snapshots for review
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-${{ matrix.os }}
+          path: ${{ runner.temp }}/snapshots.tar
+          if-no-files-found: ignore
