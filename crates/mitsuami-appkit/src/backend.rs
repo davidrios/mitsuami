@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use mitsuami_core::a11y::{A11yAction, A11yProps, ActionError};
 use mitsuami_core::backend::{
-    AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
+    Appearance, AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::units::SpacingScale;
@@ -39,21 +39,16 @@ pub struct BackendOptions {
     pub show_windows: bool,
     /// Keep a log of applied commands (for tests).
     pub record_commands: bool,
-    /// Force the light appearance, so captures are comparable across
-    /// machines regardless of system settings.
-    pub force_light_appearance: bool,
+    /// Force this appearance, so captures are comparable across machines
+    /// regardless of system settings.
+    pub appearance: Option<Appearance>,
     /// Use a private pasteboard instead of the system clipboard (tests).
     pub private_clipboard: bool,
 }
 
 impl Default for BackendOptions {
     fn default() -> Self {
-        BackendOptions {
-            show_windows: true,
-            record_commands: false,
-            force_light_appearance: false,
-            private_clipboard: false,
-        }
+        BackendOptions { show_windows: true, record_commands: false, appearance: None, private_clipboard: false }
     }
 }
 
@@ -183,14 +178,19 @@ fn font(style: TextStyle) -> Retained<NSFont> {
     unsafe { NSFont::preferredFontForTextStyle_options(text_style, &NSDictionary::new()) }
 }
 
-fn metrics(mtm: MainThreadMarker) -> PlatformMetrics {
+fn metrics(mtm: MainThreadMarker, forced: Option<Appearance>) -> PlatformMetrics {
     let size = |style| font(style).pointSize() as f32;
-    let appearance = NSApplication::sharedApplication(mtm).effectiveAppearance();
-    let candidates = unsafe { [NSAppearanceNameAqua, NSAppearanceNameDarkAqua] };
-    let names = NSArray::from_slice(&candidates);
-    let dark = appearance
-        .bestMatchFromAppearancesWithNames(&names)
-        .is_some_and(|name| &*name == unsafe { NSAppearanceNameDarkAqua });
+    let dark = match forced {
+        Some(appearance) => appearance == Appearance::Dark,
+        None => {
+            let appearance = NSApplication::sharedApplication(mtm).effectiveAppearance();
+            let candidates = unsafe { [NSAppearanceNameAqua, NSAppearanceNameDarkAqua] };
+            let names = NSArray::from_slice(&candidates);
+            appearance
+                .bestMatchFromAppearancesWithNames(&names)
+                .is_some_and(|name| &*name == unsafe { NSAppearanceNameDarkAqua })
+        }
+    };
     let workspace = NSWorkspace::sharedWorkspace();
     PlatformMetrics {
         scale_factor: NSScreen::mainScreen(mtm).map_or(1.0, |s| s.backingScaleFactor() as f32),
@@ -343,8 +343,12 @@ impl State {
                 let delegate = WindowDelegate::new(mtm, id, self.events.clone(), self.by_view.clone());
                 window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
                 delegate.observe_focus(&window);
-                if self.options.force_light_appearance {
-                    window.setAppearance(NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }).as_deref());
+                if let Some(appearance) = self.options.appearance {
+                    let name = match appearance {
+                        Appearance::Light => unsafe { NSAppearanceNameAqua },
+                        Appearance::Dark => unsafe { NSAppearanceNameDarkAqua },
+                    };
+                    window.setAppearance(NSAppearance::appearanceNamed(name).as_deref());
                 }
                 if self.options.show_windows {
                     self.pending_show.push(id);
@@ -683,7 +687,8 @@ impl Backend for AppKitBackend {
     }
 
     fn metrics(&self) -> PlatformMetrics {
-        metrics(self.state.borrow().mtm)
+        let state = self.state.borrow();
+        metrics(state.mtm, state.options.appearance)
     }
 
     fn apply(&mut self, batch: &[Command]) {

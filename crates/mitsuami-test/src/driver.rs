@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use mitsuami_core::{Command, NodeId, Size, TestHooks, Ui};
+use mitsuami_core::{Appearance, Command, NodeId, Size, TestHooks, Ui};
 use mitsuami_headless::{HeadlessBackend, HeadlessHandle};
 
 /// Which backend runs the test.
@@ -18,16 +18,20 @@ pub(crate) struct Driver {
 }
 
 impl Driver {
-    pub(crate) fn create(mode: Mode) -> (Ui, Driver) {
+    pub(crate) fn create(mode: Mode, appearance: Appearance) -> (Ui, Driver) {
         match mode {
             Mode::Headless => {
                 let backend = HeadlessBackend::new();
                 let handle = backend.handle();
+                handle.set_metrics(mitsuami_core::PlatformMetrics {
+                    dark_mode: appearance == Appearance::Dark,
+                    ..mitsuami_headless::metrics()
+                });
                 let driver = Driver { hooks: Rc::new(handle.clone()), headless: Some(handle) };
                 (Ui::new(backend), driver)
             }
             Mode::Native => {
-                let (ui, hooks) = native();
+                let (ui, hooks) = native(appearance);
                 let hooks: Rc<dyn TestHooks> = Rc::from(hooks);
                 let idle = hooks.clone();
                 crate::exec::set_idle(Some(Rc::new(move || idle.settle())));
@@ -74,11 +78,11 @@ fn show_windows() -> bool {
 }
 
 // One `native()` per platform: create the backend configured for tests
-// (offscreen unless MITSUAMI_SHOW_WINDOWS=1, recording commands, a fixed
-// appearance, a private clipboard) and return its test hooks.
+// (offscreen unless MITSUAMI_SHOW_WINDOWS=1, recording commands, the
+// test's appearance whatever the system's, a private clipboard) and return its test hooks.
 
 #[cfg(target_os = "macos")]
-fn native() -> (Ui, Box<dyn TestHooks>) {
+fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
     use mitsuami_appkit::{AppKitBackend, BackendOptions};
     let mtm = mitsuami_appkit::init_for_tests();
     let backend = AppKitBackend::new(
@@ -86,7 +90,7 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
         BackendOptions {
             show_windows: show_windows(),
             record_commands: true,
-            force_light_appearance: true,
+            appearance: Some(appearance),
             private_clipboard: true,
         },
     );
@@ -98,11 +102,11 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
 /// `mitsuami_gtk::init_for_tests`). GTK has no private clipboard, but
 /// the private display's clipboard is its own.
 #[cfg(target_os = "linux")]
-fn native() -> (Ui, Box<dyn TestHooks>) {
+fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
     use mitsuami_gtk::{BackendOptions, GtkBackend};
     let _ = show_windows;
     mitsuami_gtk::init_for_tests();
-    let backend = GtkBackend::new(BackendOptions { record_commands: true, force_light_appearance: true });
+    let backend = GtkBackend::new(BackendOptions { record_commands: true, appearance: Some(appearance) });
     let hooks = backend.handle();
     (Ui::new(backend), Box::new(hooks))
 }
@@ -110,13 +114,13 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
 /// Test windows are alive but invisible (and click-through) unless
 /// MITSUAMI_SHOW_WINDOWS=1: XAML only lays out and renders live windows.
 #[cfg(windows)]
-fn native() -> (Ui, Box<dyn TestHooks>) {
+fn native(appearance: Appearance) -> (Ui, Box<dyn TestHooks>) {
     use mitsuami_winui::{BackendOptions, WinUiBackend};
     mitsuami_winui::init_for_tests();
     let backend = WinUiBackend::new(BackendOptions {
         show_windows: show_windows(),
         record_commands: true,
-        force_light_theme: true,
+        appearance: Some(appearance),
         private_clipboard: true,
     });
     let hooks = backend.handle();
@@ -124,7 +128,7 @@ fn native() -> (Ui, Box<dyn TestHooks>) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-fn native() -> (Ui, Box<dyn TestHooks>) {
+fn native(_: Appearance) -> (Ui, Box<dyn TestHooks>) {
     let _ = show_windows;
     panic!("mitsuami-test: no native backend for this platform")
 }

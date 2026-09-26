@@ -9,7 +9,7 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib, graphene, gsk, pango};
 use mitsuami_core::a11y::{A11yAction, A11yProps, ActionError};
 use mitsuami_core::backend::{
-    AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
+    Appearance, AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::services::Reply;
@@ -28,9 +28,10 @@ use crate::services::{GtkServices, MenuParts};
 pub struct BackendOptions {
     /// Keep a log of applied commands (for tests).
     pub record_commands: bool,
-    /// Force the light appearance, so captures are comparable across
-    /// machines regardless of system settings.
-    pub force_light_appearance: bool,
+    /// Force this appearance, so captures are comparable across machines
+    /// regardless of system settings. GTK's settings are per display, so
+    /// this applies to every window on it.
+    pub appearance: Option<Appearance>,
 }
 
 /// Native widget → node. Shared with the windows' focus observers.
@@ -260,10 +261,10 @@ impl GtkBackend {
     /// GTK must be initialized (`gtk::init`) on this thread.
     pub fn new(options: BackendOptions) -> GtkBackend {
         assert!(gtk::is_initialized_main_thread(), "mitsuami: initialize GTK on the main thread first");
-        if options.force_light_appearance
+        if let Some(appearance) = options.appearance
             && let Some(settings) = gtk::Settings::default()
         {
-            settings.set_gtk_application_prefer_dark_theme(false);
+            settings.set_gtk_application_prefer_dark_theme(appearance == Appearance::Dark);
             settings.set_gtk_theme_name(Some("Adwaita"));
         }
         GtkBackend {

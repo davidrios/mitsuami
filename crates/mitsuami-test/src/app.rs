@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use mitsuami_core::task::ManualClock;
 
-use mitsuami_core::{A11yNode, Command, NodeId, NodeInfo, Role, Size, Ui, View};
+use mitsuami_core::{A11yNode, Appearance, Command, NodeId, NodeInfo, Role, Size, Ui, View};
 use mitsuami_headless::{FakeServices, FakeServicesHandle, HeadlessHandle};
 use mitsuami_reactive::Owner;
 
@@ -28,6 +28,7 @@ pub struct TestApp {
     driver: Driver,
     owner: Owner,
     window: Cell<Option<NodeId>>,
+    window_size: Size,
     pub(crate) context: TestContext,
 }
 
@@ -42,8 +43,8 @@ pub(crate) fn wait_timeout() -> Duration {
 pub const DEFAULT_WINDOW: Size = Size::new(800.0, 600.0);
 
 impl TestApp {
-    pub(crate) fn new(context: TestContext, mode: Mode) -> TestApp {
-        let (ui, driver) = Driver::create(mode);
+    pub(crate) fn new(context: TestContext, mode: Mode, appearance: Appearance, window_size: Size) -> TestApp {
+        let (ui, driver) = Driver::create(mode, appearance);
         // Tests own time: timers only fire when the test advances the clock.
         let clock = Rc::new(ManualClock::default());
         ui.set_clock(clock.clone());
@@ -55,7 +56,7 @@ impl TestApp {
             mitsuami_reactive::provide(ui.clone());
             mitsuami_core::provide_stores();
         });
-        TestApp { ui, clock, services, driver, owner, window: Cell::new(None), context }
+        TestApp { ui, clock, services, driver, owner, window: Cell::new(None), window_size, context }
     }
 
     /// The scripted platform services: answer dialogs, inspect the
@@ -144,7 +145,8 @@ impl TestApp {
         self.owner.with(|| mitsuami_reactive::provide(value));
     }
 
-    /// Mounts a view in the test window (800×600 unless resized) and settles.
+    /// Mounts a view in the test window (800×600 unless resized, or the
+    /// story's size) and settles.
     pub fn mount<V: View>(&self, view: impl FnOnce() -> V) -> NodeId {
         let window = self.window();
         let root = self.owner.with(|| view().build(&self.ui));
@@ -158,7 +160,7 @@ impl TestApp {
         if let Some(window) = self.window.get() {
             return window;
         }
-        let window = self.ui.create_window("mitsuami test", DEFAULT_WINDOW);
+        let window = self.ui.create_window("mitsuami test", self.window_size);
         self.window.set(Some(window));
         window
     }

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use mitsuami_core::a11y::{A11yAction, A11yProps, ActionError};
 use mitsuami_core::backend::{
-    AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
+    Appearance, AvailableSpace, Backend, CaptureError, EventSink, FontSizes, Image, Key, MeasureRequest, NativeState,
     PlatformMetrics, SyntheticInput,
 };
 use mitsuami_core::services::{MenuBarData, MenuEntry, Reply};
@@ -30,20 +30,15 @@ pub struct BackendOptions {
     pub show_windows: bool,
     /// Keep a log of applied commands (for tests).
     pub record_commands: bool,
-    /// Force the light theme, so captures are comparable across machines.
-    pub force_light_theme: bool,
+    /// Force this theme, so captures are comparable across machines.
+    pub appearance: Option<Appearance>,
     /// Keep clipboard text in memory instead of the system clipboard (tests).
     pub private_clipboard: bool,
 }
 
 impl Default for BackendOptions {
     fn default() -> Self {
-        BackendOptions {
-            show_windows: true,
-            record_commands: false,
-            force_light_theme: false,
-            private_clipboard: false,
-        }
+        BackendOptions { show_windows: true, record_commands: false, appearance: None, private_clipboard: false }
     }
 }
 
@@ -701,8 +696,12 @@ impl State {
         let title_bar: w::TitleBar = children.GetAt(0)?.cast()?;
         let host: w::Canvas = children.GetAt(1)?.cast()?;
         let host_element: w::UIElement = host.cast()?;
-        if self.options.force_light_theme {
-            root.cast::<w::IFrameworkElement>()?.SetRequestedTheme(w::ElementTheme::Light)?;
+        if let Some(appearance) = self.options.appearance {
+            let theme = match appearance {
+                Appearance::Light => w::ElementTheme::Light,
+                Appearance::Dark => w::ElementTheme::Dark,
+            };
+            root.cast::<w::IFrameworkElement>()?.SetRequestedTheme(theme)?;
         }
         let iwindow: w::IWindow = window.cast()?;
         iwindow.SetContent(&root.cast::<w::UIElement>()?)?;
@@ -715,10 +714,10 @@ impl State {
         let app_window = window.cast::<w::IWindow2>()?.AppWindow()?;
         let caption = app_window.cast::<w::IAppWindow>()?.TitleBar()?;
         caption.cast::<w::IAppWindowTitleBar2>()?.SetPreferredHeightOption(w::TitleBarHeightOption::Standard)?;
-        caption.cast::<w::IAppWindowTitleBar3>()?.SetPreferredTheme(if self.options.force_light_theme {
-            w::TitleBarTheme::Light
-        } else {
-            w::TitleBarTheme::UseDefaultAppMode
+        caption.cast::<w::IAppWindowTitleBar3>()?.SetPreferredTheme(match self.options.appearance {
+            Some(Appearance::Light) => w::TitleBarTheme::Light,
+            Some(Appearance::Dark) => w::TitleBarTheme::Dark,
+            None => w::TitleBarTheme::UseDefaultAppMode,
         })?;
         let window_id = app_window.cast::<w::IAppWindow>()?.Id()?;
         let hwnd = window_id.value as usize as w::HWND;
@@ -1386,10 +1385,12 @@ impl Backend for WinUiBackend {
     }
 
     fn metrics(&self) -> PlatformMetrics {
-        let dark = !self.state.borrow().options.force_light_theme
-            && w::Application::Current()
+        let dark = match self.state.borrow().options.appearance {
+            Some(appearance) => appearance == Appearance::Dark,
+            None => w::Application::Current()
                 .and_then(|a| a.cast::<w::IApplication>()?.RequestedTheme())
-                .is_ok_and(|t| t == w::ApplicationTheme::Dark);
+                .is_ok_and(|t| t == w::ApplicationTheme::Dark),
+        };
         let settings = w::UISettings::new().ok();
         PlatformMetrics {
             scale_factor: unsafe { w::GetDpiForSystem() } as f32 / 96.0,

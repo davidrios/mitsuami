@@ -6,10 +6,13 @@ use std::io::Write;
 use std::panic::{self, AssertUnwindSafe};
 use std::time::Instant;
 
-use crate::__private::TestCase;
-use crate::app::{TestApp, TestContext};
+use mitsuami_core::{Appearance, Size};
+
+use crate::__private::{StoryCase, StoryFuture, TestCase, TestFuture};
+use crate::app::{DEFAULT_WINDOW, TestApp, TestContext};
 use crate::driver::{Mode, native_available, with_pool};
 use crate::exec::block_on;
+use crate::story::Variant;
 
 struct Options {
     filters: Vec<String>,
@@ -45,8 +48,53 @@ fn parse(args: impl Iterator<Item = String>) -> Options {
     options
 }
 
-fn display_name(case: &TestCase) -> &'static str {
-    case.name.split_once("::").map_or(case.name, |(_, rest)| rest)
+/// One test to run: a test case, or a story at one size in one variant.
+struct Job {
+    /// `module::path::test_name` (plus `@<size>-<variant>` for stories),
+    /// without the crate.
+    name: String,
+    file_prefix: String,
+    manifest_dir: &'static str,
+    headless_only: bool,
+    kind: JobKind,
+}
+
+enum JobKind {
+    Test(fn(TestApp) -> TestFuture),
+    Story { run: for<'a> fn(&'a TestApp) -> StoryFuture<'a>, size: Size, variant: Variant, label: String },
+}
+
+fn display_name(name: &'static str) -> &'static str {
+    name.split_once("::").map_or(name, |(_, rest)| rest)
+}
+
+fn jobs() -> Vec<Job> {
+    let mut jobs: Vec<Job> = inventory::iter::<TestCase>
+        .into_iter()
+        .map(|case| Job {
+            name: display_name(case.name).to_owned(),
+            file_prefix: case.name.replace("::", "__"),
+            manifest_dir: case.manifest_dir,
+            headless_only: case.headless_only,
+            kind: JobKind::Test(case.run),
+        })
+        .collect();
+    for story in inventory::iter::<StoryCase> {
+        for &(width, height) in story.sizes {
+            for &variant in story.variants {
+                let label = format!("{width}x{height}-{}", variant.name());
+                jobs.push(Job {
+                    name: format!("{}@{label}", display_name(story.name)),
+                    file_prefix: story.name.replace("::", "__"),
+                    manifest_dir: story.manifest_dir,
+                    headless_only: false,
+                    kind: JobKind::Story { run: story.run, size: Size::new(width, height), variant, label },
+                });
+            }
+        }
+    }
+    jobs.sort_by(|a, b| a.name.cmp(&b.name));
+    jobs
 }
 
 fn selected(options: &Options, name: &str) -> bool {
@@ -68,16 +116,15 @@ fn payload_text(payload: &(dyn Any + Send)) -> String {
 
 pub fn run_main() {
     let options = parse(std::env::args().skip(1));
-    let mut cases: Vec<&TestCase> = inventory::iter::<TestCase>.into_iter().collect();
-    cases.sort_by_key(|c| c.name);
-    let total = cases.len();
-    let cases: Vec<&TestCase> = cases.into_iter().filter(|c| selected(&options, display_name(c))).collect();
+    let jobs = jobs();
+    let total = jobs.len();
+    let jobs: Vec<Job> = jobs.into_iter().filter(|j| selected(&options, &j.name)).collect();
 
     if options.list {
-        for case in &cases {
-            println!("{}: test", display_name(case));
+        for job in &jobs {
+            println!("{}: test", job.name);
         }
-        println!("\n{} tests, 0 benchmarks", cases.len());
+        println!("\n{} tests, 0 benchmarks", jobs.len());
         return;
     }
     if options.ignored {
@@ -97,29 +144,34 @@ pub fn run_main() {
         PANIC_MESSAGE.with(|m| *m.borrow_mut() = Some(message));
     }));
 
-    println!("\nrunning {} tests", cases.len());
+    let count = jobs.len();
+    println!("\nrunning {count} tests");
     let started = Instant::now();
     let mut failures = Vec::new();
     let mut ignored = 0;
-    for case in &cases {
-        let name = display_name(case);
+    for job in jobs {
+        let name = job.name;
         print!("test {name} ... ");
         let _ = std::io::stdout().flush();
-        if mode == Mode::Native && case.headless_only {
+        if mode == Mode::Native && job.headless_only {
             println!("ignored, headless only");
             ignored += 1;
             continue;
         }
-        let context = TestContext {
-            name: name.to_owned(),
-            file_prefix: case.name.replace("::", "__"),
-            manifest_dir: case.manifest_dir,
-        };
-        let run = case.run;
+        let context = TestContext { name: name.clone(), file_prefix: job.file_prefix, manifest_dir: job.manifest_dir };
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            with_pool(|| {
-                let app = TestApp::new(context, mode);
-                block_on(run(app));
+            with_pool(|| match job.kind {
+                JobKind::Test(run) => {
+                    let app = TestApp::new(context, mode, Appearance::Light, DEFAULT_WINDOW);
+                    block_on(run(app));
+                }
+                JobKind::Story { run, size, variant, label } => {
+                    let app = TestApp::new(context, mode, variant.appearance(), size);
+                    block_on(async {
+                        run(&app).await;
+                        app.assert_visual_snapshot(&label).await;
+                    });
+                }
             })
         }));
         match result {
@@ -146,9 +198,9 @@ pub fn run_main() {
     let status = if failures.is_empty() { "ok" } else { "FAILED" };
     println!(
         "\ntest result: {status}. {} passed; {} failed; {ignored} ignored; 0 measured; {} filtered out; finished in {:.2}s\n",
-        cases.len() - failures.len() - ignored,
+        count - failures.len() - ignored,
         failures.len(),
-        total - cases.len(),
+        total - count,
         started.elapsed().as_secs_f64()
     );
     if !failures.is_empty() {

@@ -25,7 +25,8 @@ mod widget;
 pub use a11y::{A11yAction, A11yNode, A11yProps, ActionError, Role};
 pub use any_value::{AnyValue, Opaque};
 pub use backend::{
-    AvailableSpace, Backend, EventSink, Key, MeasureRequest, NativeState, PlatformMetrics, SyntheticInput, TestHooks,
+    Appearance, AvailableSpace, Backend, EventSink, Key, MeasureRequest, NativeState, PlatformMetrics, SyntheticInput,
+    TestHooks,
 };
 pub use command::{Command, EventValue, PointerEvent, PointerKind, UiEvent};
 pub use custom::{Composed, Custom, CustomProps, CustomView, CustomWidget, Drawn, Render, Renderer};

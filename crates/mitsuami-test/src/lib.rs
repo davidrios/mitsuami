@@ -14,6 +14,16 @@
 //! mitsuami_test::main!();
 //! ```
 //!
+//! Stories render a view in a given state, and compare a capture of it
+//! with a baseline for every size and variant:
+//!
+//! ```ignore
+//! #[mitsuami_test::story(sizes = [(320, 200)], variants = [Light, Dark])]
+//! fn counter_big_number() -> impl View {
+//!     Counter(42)
+//! }
+//! ```
+//!
 //! Test targets use `harness = false`: native UI must own the main thread,
 //! so mitsuami runs tests itself. Controls are found through the
 //! accessibility tree, and driven with accessibility actions or synthesized
@@ -27,14 +37,16 @@ mod locator;
 mod query;
 mod runner;
 mod snapshot;
+mod story;
 mod visual;
 
 pub use app::TestApp;
 pub use driver::Mode;
 pub use locator::{Expectation, Locator};
 pub use mitsuami_headless::{FakeServicesHandle, Pending, PendingAlert, PendingOpen, PendingSave};
-pub use mitsuami_test_macros::test;
+pub use mitsuami_test_macros::{story, test};
 pub use query::{Query, by_label, by_role, by_test_id, by_text};
+pub use story::Variant;
 
 pub mod prelude {
     pub use crate::{Expectation, Locator, Query, TestApp, by_label, by_role, by_test_id, by_text};
@@ -61,6 +73,7 @@ pub mod __private {
     pub use crate::runner::run_main;
 
     pub type TestFuture = Pin<Box<dyn Future<Output = ()>>>;
+    pub type StoryFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 
     pub struct TestCase {
         pub name: &'static str,
@@ -72,4 +85,16 @@ pub mod __private {
     }
 
     inventory::collect!(TestCase);
+
+    pub struct StoryCase {
+        pub name: &'static str,
+        pub manifest_dir: &'static str,
+        /// Window content sizes, in logical units.
+        pub sizes: &'static [(f32, f32)],
+        pub variants: &'static [crate::Variant],
+        /// Mounts the story and plays its script, if any.
+        pub run: for<'a> fn(&'a crate::TestApp) -> StoryFuture<'a>,
+    }
+
+    inventory::collect!(StoryCase);
 }

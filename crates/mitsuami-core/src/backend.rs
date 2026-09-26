@@ -39,6 +39,14 @@ pub struct PlatformMetrics {
     pub reduced_motion: bool,
 }
 
+/// Light or dark. Backends can force one (tests do, so captures don't
+/// depend on the system setting).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Appearance {
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FontSizes {
     pub large_title: f32,

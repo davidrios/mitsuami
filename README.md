@@ -59,6 +59,10 @@ MITSUAMI_WAIT_MS=5000 cargo test             # longer wait for background work i
 MITSUAMI_SKIP_MACHINE_SNAPSHOTS=1 cargo test # skip native snapshots that depend on fonts, OS and scale (CI)
 ```
 
+Stories (`#[mitsuami_test::story]`) render a view in a given state and
+compare a capture with a baseline at each size, in light and dark: see
+`crates/mitsuami/tests/stories.rs`.
+
 Tests control time (`app.advance(..)` moves the clock that `sleep` uses)
 and answer dialogs through scripted services (`app.services()`), so they
 never open real dialogs or touch your clipboard.
