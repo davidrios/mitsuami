@@ -1,10 +1,11 @@
 //! The built-in widgets as stories: captured on each platform at each size,
-//! in light and dark, and compared with their baselines.
+//! in light and dark, and compared with their baselines. Heights fit the
+//! content, since control heights differ per platform.
 
 use mitsuami::prelude::*;
 use mitsuami_test::prelude::*;
 
-#[mitsuami_test::story(sizes = [(340, 64)])]
+#[mitsuami_test::story(sizes = [(340, fit)])]
 fn buttons() -> impl View {
     Row::new().padding(16).gap(8).align(Align::Start).children((
         Button::new("Default"),
@@ -13,7 +14,7 @@ fn buttons() -> impl View {
     ))
 }
 
-#[mitsuami_test::story(sizes = [(240, 200)])]
+#[mitsuami_test::story(sizes = [(240, fit)])]
 fn text_styles() -> impl View {
     Column::new().padding(16).gap(4).children((
         Text::new("Large title").text_style(TextStyle::LargeTitle),
@@ -26,7 +27,7 @@ fn text_styles() -> impl View {
     ))
 }
 
-#[mitsuami_test::story(sizes = [(200, 164)])]
+#[mitsuami_test::story(sizes = [(200, fit)])]
 fn toggles() -> impl View {
     Column::new().padding(16).gap(8).align(Align::Start).children((
         Checkbox::new("Unchecked"),
@@ -49,7 +50,7 @@ fn signup() -> impl View {
 
 /// The form at a phone's width and a window's: inputs stretch, the button
 /// stays at the end.
-#[mitsuami_test::story(sizes = [(280, 148), (480, 148)], play = agree)]
+#[mitsuami_test::story(sizes = [(280, fit), (480, fit)], play = agree)]
 fn signup_ready() -> impl View {
     signup()
 }

@@ -67,10 +67,11 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// state to capture it in. It runs as one test per size and variant, which
 /// mounts the view in a window of that size, plays the script if there is
 /// one, then compares a capture of the window with its baseline in
-/// `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`.
+/// `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`
+/// (`x<height>` is `xfit` for fitted heights).
 ///
 /// ```ignore
-/// #[mitsuami_test::story(sizes = [(320, 200)], variants = [Light, Dark], play = type_a_name)]
+/// #[mitsuami_test::story(sizes = [(320, fit), (640, 480)], variants = [Light, Dark], play = type_a_name)]
 /// fn signup_filled() -> impl View { signup() }
 ///
 /// async fn type_a_name(app: &TestApp) {
@@ -78,8 +79,9 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 ///
-/// - `sizes`: window content sizes, in logical units. The default is the
-///   test window's, 800×600.
+/// - `sizes`: window content sizes, in logical units. A height of `fit`
+///   fits the content, whose height differs per platform, at its first
+///   layout. The default is the test window's, 800×600.
 /// - `variants`: `Light`, `Dark`. The default is both.
 /// - `play`: an `async fn(&TestApp)` that brings the view into the state to
 ///   capture (focus a field, type text) once it is mounted.
@@ -94,7 +96,7 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("sizes") {
             let syn::Expr::Array(array) = meta.value()?.parse()? else {
-                return Err(meta.error("expected a list of sizes: `sizes = [(320, 200), (640, 480)]`"));
+                return Err(meta.error("expected a list of sizes: `sizes = [(320, fit), (640, 480)]`"));
             };
             let mut list = Vec::new();
             for element in array.elems {
@@ -103,7 +105,12 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
                         let mut elems = tuple.elems.into_iter();
                         list.push((elems.next().unwrap(), elems.next().unwrap()));
                     }
-                    other => return Err(syn::Error::new_spanned(other, "expected a size: `(width, height)`")),
+                    other => {
+                        return Err(syn::Error::new_spanned(
+                            other,
+                            "expected a size: `(width, height)` or `(width, fit)`",
+                        ));
+                    }
                 }
             }
             if list.is_empty() {
@@ -145,10 +152,18 @@ pub fn story(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     let sizes = match sizes {
         Some(sizes) => {
-            let sizes = sizes.iter().map(|(w, h)| quote! { ((#w) as f32, (#h) as f32) });
+            let sizes = sizes.iter().map(|(w, h)| {
+                let fit = matches!(h, syn::Expr::Path(p) if p.path.is_ident("fit"));
+                let h = if fit {
+                    quote! { ::core::option::Option::None }
+                } else {
+                    quote! { ::core::option::Option::Some((#h) as f32) }
+                };
+                quote! { ((#w) as f32, #h) }
+            });
             quote! { &[#(#sizes),*] }
         }
-        None => quote! { &[(800.0, 600.0)] },
+        None => quote! { &[(800.0, ::core::option::Option::Some(600.0))] },
     };
     let variants = variants.unwrap_or_else(|| {
         vec![

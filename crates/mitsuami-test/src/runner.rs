@@ -7,7 +7,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 use std::time::Instant;
 
-use mitsuami_core::{Appearance, Size};
+use mitsuami_core::{Appearance, Size, WindowSize};
 
 use crate::__private::{StoryCase, StoryFuture, TestCase, TestFuture};
 use crate::app::{DEFAULT_WINDOW, TestApp, TestContext};
@@ -62,7 +62,7 @@ struct Job {
 
 enum JobKind {
     Test(fn(TestApp) -> TestFuture),
-    Story { run: for<'a> fn(&'a TestApp) -> StoryFuture<'a>, size: Size, variant: Variant, label: String },
+    Story { run: for<'a> fn(&'a TestApp) -> StoryFuture<'a>, size: WindowSize, variant: Variant, label: String },
 }
 
 fn display_name(name: &'static str) -> &'static str {
@@ -82,14 +82,18 @@ fn jobs() -> Vec<Job> {
         .collect();
     for story in inventory::iter::<StoryCase> {
         for &(width, height) in story.sizes {
+            let (size, height_label) = match height {
+                Some(height) => (WindowSize::Fixed(Size::new(width, height)), height.to_string()),
+                None => (WindowSize::FitHeight(width), "fit".to_owned()),
+            };
             for &variant in story.variants {
-                let label = format!("{width}x{height}-{}", variant.name());
+                let label = format!("{width}x{height_label}-{}", variant.name());
                 jobs.push(Job {
                     name: format!("{}@{label}", display_name(story.name)),
                     file_prefix: story.name.replace("::", "__"),
                     manifest_dir: story.manifest_dir,
                     headless_only: false,
-                    kind: JobKind::Story { run: story.run, size: Size::new(width, height), variant, label },
+                    kind: JobKind::Story { run: story.run, size, variant, label },
                 });
             }
         }
@@ -169,7 +173,7 @@ pub fn run_main() {
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             with_pool(|| match job.kind {
                 JobKind::Test(run) => {
-                    let app = TestApp::new(context, mode, Appearance::Light, DEFAULT_WINDOW);
+                    let app = TestApp::new(context, mode, Appearance::Light, DEFAULT_WINDOW.into());
                     block_on(run(app));
                 }
                 JobKind::Story { run, size, variant, label } => {

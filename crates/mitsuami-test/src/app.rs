@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use mitsuami_core::task::ManualClock;
 
-use mitsuami_core::{A11yNode, Appearance, Command, NodeId, NodeInfo, Role, Size, Ui, View};
+use mitsuami_core::{A11yNode, Appearance, Command, NodeId, NodeInfo, Role, Size, Ui, View, WindowSize};
 use mitsuami_headless::{FakeServices, FakeServicesHandle, HeadlessHandle};
 use mitsuami_reactive::Owner;
 
@@ -46,7 +46,7 @@ pub struct TestApp {
     driver: Driver,
     owner: Owner,
     window: Cell<Option<NodeId>>,
-    window_size: Size,
+    window_size: WindowSize,
     pub(crate) context: TestContext,
 }
 
@@ -61,7 +61,7 @@ pub(crate) fn wait_timeout() -> Duration {
 pub const DEFAULT_WINDOW: Size = Size::new(800.0, 600.0);
 
 impl TestApp {
-    pub(crate) fn new(context: TestContext, mode: Mode, appearance: Appearance, window_size: Size) -> TestApp {
+    pub(crate) fn new(context: TestContext, mode: Mode, appearance: Appearance, window_size: WindowSize) -> TestApp {
         let (ui, driver) = Driver::create(mode, appearance);
         // Tests own time: timers only fire when the test advances the clock.
         let clock = Rc::new(ManualClock::default());

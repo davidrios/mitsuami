@@ -607,7 +607,7 @@ fn counter_big_number() -> impl View { Counter(42) }
 
 Stories can also be interaction states. `#[story(play = ...)]` runs a test script first (e.g. focus a field, type text) and then captures the result.
 
-Each size and variant runs as its own test, named `<story>@<width>x<height>-<variant>` (`signup_ready@280x148-dark`), in a window opened at that size with the variant's appearance forced. Its baseline is `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`. `sizes` defaults to the test window's 800×600, and `variants` to `[Light, Dark]`. Headless has no pixels, so there a story only checks that the view mounts and the script plays. `crates/mitsuami/tests/stories.rs` has the built-in widgets as stories.
+Each size and variant runs as its own test, named `<story>@<width>x<height>-<variant>` (`signup_ready@280xfit-dark`), in a window opened at that size with the variant's appearance forced. A height of `fit` fits the content at its first layout (`WindowSize::FitHeight`): control heights differ per platform, so a fixed height that suits one clips or pads another. Its baseline is `tests/visual/<backend>/<image>/<story>@<width>x<height>-<variant>.png`. `sizes` defaults to the test window's 800×600, and `variants` to `[Light, Dark]`. Headless has no pixels, so there a story only checks that the view mounts and the script plays. `crates/mitsuami/tests/stories.rs` has the built-in widgets as stories.
 
 **Capture.** Capture happens in-process and offscreen, so no screen-recording permissions are needed and nothing depends on window placement:
 

@@ -18,7 +18,7 @@
 //! with a baseline for every size and variant:
 //!
 //! ```ignore
-//! #[mitsuami_test::story(sizes = [(320, 200)], variants = [Light, Dark])]
+//! #[mitsuami_test::story(sizes = [(320, fit)], variants = [Light, Dark])]
 //! fn counter_big_number() -> impl View {
 //!     Counter(42)
 //! }
@@ -89,8 +89,9 @@ pub mod __private {
     pub struct StoryCase {
         pub name: &'static str,
         pub manifest_dir: &'static str,
-        /// Window content sizes, in logical units.
-        pub sizes: &'static [(f32, f32)],
+        /// Window content sizes, in logical units: a width, and a height
+        /// or `None` to fit the content's.
+        pub sizes: &'static [(f32, Option<f32>)],
         pub variants: &'static [crate::Variant],
         /// Mounts the story and plays its script, if any.
         pub run: for<'a> fn(&'a crate::TestApp) -> StoryFuture<'a>,
