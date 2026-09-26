@@ -1,0 +1,17 @@
+# KDE Plasma spike: Qt Quick + Kirigami driven imperatively from Rust.
+# Throwaway: not a workspace member, never published.
+[package]
+name = "kirigami-spike"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[workspace]
+
+[dependencies]
+png = "0.18"
+
+[build-dependencies]
+cc = "1.2"
+pkg-config = "0.3"
